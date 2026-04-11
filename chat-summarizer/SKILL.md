@@ -6,7 +6,8 @@ description: Summarizes the current chat session and saves it as a structured .m
 # Chat Summarizer Skill
 
 Produces a structured `.md` summary using **gemma4:31b via Ollama** (no Claude API credits used),
-cross-references it with related past sessions, and links everything into `Memory.md`.
+saves it into a **per-topic folder**, cross-references it with related past sessions,
+and links everything into `Memory.md`.
 
 ## Prerequisites
 
@@ -15,150 +16,150 @@ ollama serve
 ollama pull gemma4:31b
 ```
 
+## Vault structure produced
+
+```
+$SUMMARY_OUTPUT_DIR/
+├── Memory.md                          ← master index, grouped by topic
+├── claude-code-and-skills/
+│   ├── skill-builder-2026-04-08.md
+│   ├── chat-summarizer-evolved-2026-04-09.md
+│   └── chat-summarizer-xref-2026-04-10.md
+└── python-and-data-science/
+    └── ppo-frozenlake-2026-04-01.md
+```
+
+---
+
+## Trigger phrases
+
+**Active session** (default): "summarize this chat", "save this conversation", "export session notes",
+"generate a chat summary", "make a markdown of this session", "wrap up our chat"
+
+**External file**: "summarize this file", "process this chat log", "run the flow on this md",
+"add this to my vault", "index this chat export"
+
 ---
 
 ## Workflow
 
-### Step 1 — Derive output filename
+### Determine input mode
 
-From the conversation, identify the dominant topic and form a slug:
-`<topic-slug>-<YYYY-MM-DD>.md`  
-Examples: `skill-builder-workflow-2026-04-10.md`, `battleship-sdl2-arch-2026-04-10.md`  
+| Situation                                    | Input mode                                |
+| -------------------------------------------- | ----------------------------------------- |
+| User asks to summarize the current session   | **Mode A** — dump transcript from context |
+| User provides a path or uploads a `.md` file | **Mode B** — use that file directly       |
+
+---
+
+### Mode A — Active session
+
+#### Step A1 — Derive output filename
+
+From the conversation, form a slug: `<topic-slug>-<YYYY-MM-DD>.md`
 Fallback: `chat-summary-<YYYY-MM-DD>.md`
+`TEMP_PATH=/tmp/<slug>.md`
 
-Determine the output directory from `.env` (`SUMMARY_OUTPUT_DIR`). The full output path is:
-`$SUMMARY_OUTPUT_DIR/<slug>.md`
-
-### Step 2 — Pre-classify to find related sessions
-
-Before summarizing, ask `update_memory.py` which topic the new file will belong to,
-and get the list of existing sessions in that topic:
+#### Step A2 — Pre-classify
 
 ```bash
-python scripts/update_memory.py "$SUMMARY_OUTPUT_DIR/<slug>.md" \
-    --memory "$MEMORY_MD_PATH" \
-    --pre-run
+python scripts/update_memory.py "$TEMP_PATH" --memory "$MEMORY_MD_PATH" --pre-run
 ```
 
-This prints JSON like:
+Parse `topic`, `topic_folder`, `entries`.
 
-```json
-{
-  "topic": "Claude Code & Skills",
-  "entries": [
-    {"slug": "claude-code-setup-2026-03-22", "path": "notes/claude-code-setup-2026-03-22.md", "description": "..."},
-    ...
-  ]
-}
-```
+#### Step A3 — Dump raw transcript
 
-Parse the `entries` array — these are the related sessions to pass to the summarizer.
-
-### Step 3 — Dump raw transcript
-
-Write the full conversation to `/tmp/chat-transcript.txt`, one turn per line:
+Write full conversation to `/tmp/chat-transcript.txt`:
 
 ```
 USER: <message>
 ASSISTANT: <message>
 ```
 
-### Step 4 — Summarize with local model
-
-Build `--related` flags from the entries returned in Step 2:
+#### Step A4 — Summarize
 
 ```bash
 python scripts/summarize_with_ollama.py /tmp/chat-transcript.txt \
-    --related "notes/claude-code-setup-2026-03-22.md|Configured Claude Code custom skills" \
-    --related "notes/skill-builder-workflow-2026-04-10.md|Built chat-summarizer skill" \
-    > "$SUMMARY_OUTPUT_DIR/<slug>.md"
+    --related "claude-code-and-skills/skill-builder-2026-04-08.md|Built initial skill structure" \
+    > "$TEMP_PATH"
 ```
 
-If there are no related entries, omit the `--related` flags.
+Omit `--related` if `entries` was empty.
 
-The output file will contain a `## Related Sessions` section with contextual links
-to the related files already written in.
+---
 
-### Step 5 — Commit to Memory.md and back-patch
+### Mode B — External .md file
+
+#### Step B1 — Identify the input file
+
+Get the path from the user's message. If they uploaded a file, use its path.
+`INPUT_FILE=/path/to/their-chat-export.md`
+
+#### Step B2 — Derive output filename
+
+Read the first heading or first few lines of the file to infer a topic slug.
+`TEMP_PATH=/tmp/<slug>.md`
+
+#### Step B3 — Pre-classify
 
 ```bash
-python scripts/update_memory.py "$SUMMARY_OUTPUT_DIR/<slug>.md" \
-    --memory "$MEMORY_MD_PATH"
+python scripts/update_memory.py "$TEMP_PATH" --memory "$MEMORY_MD_PATH" --pre-run
+```
+
+Parse `topic`, `topic_folder`, `entries`.
+
+#### Step B4 — Summarize with --md flag
+
+```bash
+python scripts/summarize_with_ollama.py "$INPUT_FILE" --md \
+    --related "claude-code-and-skills/skill-builder-2026-04-08.md|Built initial skill structure" \
+    > "$TEMP_PATH"
+```
+
+The `--md` flag tells the summarizer the input is already markdown, not a raw transcript.
+Omit `--related` if `entries` was empty.
+
+---
+
+### Step 5 — Commit (both modes)
+
+```bash
+python scripts/update_memory.py "$TEMP_PATH" --memory "$MEMORY_MD_PATH"
 ```
 
 This will:
 
-1. Insert the new entry under the correct topic heading in `Memory.md`
-2. Open every existing `.md` file in that topic and add the new session to _their_ `## Related Sessions`
-3. Add back-references in the new file pointing to all existing sessions
-4. Update the `*Last updated:*` footer in `Memory.md`
+1. Move the file into `$SUMMARY_OUTPUT_DIR/<topic_folder>/`
+2. Insert a new entry under the correct `## Topic` heading in `Memory.md`
+3. Back-patch every existing `.md` in the topic folder
+4. Add back-references in the new file to all existing ones
+5. Print `FINAL_PATH=...`
 
-### Step 6 — Copy and present
+### Step 6 — Present
 
-```bash
-python scripts/save_to_env_dir.py "$SUMMARY_OUTPUT_DIR/<slug>.md"
-```
-
-Then call `present_files` on the summary `.md`.
-Confirm Memory.md was updated and how many files were cross-referenced.
+Call `present_files` on the final `.md` path.
+Confirm how many files were cross-referenced and which topic folder was used.
 
 ---
 
-## Memory.md structure
+## .env variables
 
-```markdown
-# Memory
-
-> Auto-maintained index of all chat sessions, grouped by topic.
-
----
-
-## Claude Code & Skills
-
-- [skill-builder-workflow-2026-04-10](./notes/skill-builder-workflow-2026-04-10.md) — Built chat-summarizer with Ollama and Memory index
-- [claude-code-setup-2026-03-22](./notes/claude-code-setup-2026-03-22.md) — Configured Claude Code custom skills directory
-
-## Python & Data Science
-
-- [ppo-frozenlake-report-2026-04-01](./notes/ppo-frozenlake-report-2026-04-01.md) — Implemented PPO training loop for FrozenLake
-
----
-
-_Last updated: 2026-04-10_
-```
-
-## Individual summary file structure
-
-```markdown
-# Chat Summary: <title>
-
-...
-
-## Related Sessions
-
-- [claude-code-setup-2026-03-22](../claude-code-setup-2026-03-22.md) — Earlier session where Claude Code was first configured; this session built on that setup
-- [skill-builder-workflow-2026-04-10](../skill-builder-workflow-2026-04-10.md) — Continued here; added Ollama summarization to the skill created in this session
-  ...
-```
-
----
-
-## .env variables used
-
-| Variable             | Purpose                                           |
-| -------------------- | ------------------------------------------------- |
-| `SUMMARY_OUTPUT_DIR` | Directory where summary `.md` files are saved     |
-| `MEMORY_MD_PATH`     | Full path to `Memory.md` (default: `./Memory.md`) |
+| Variable             | Purpose                                                             |
+| -------------------- | ------------------------------------------------------------------- |
+| `SUMMARY_OUTPUT_DIR` | Base directory (vault root or notes folder)                         |
+| `MEMORY_MD_PATH`     | Full path to `Memory.md` (default: `$SUMMARY_OUTPUT_DIR/Memory.md`) |
 
 ## Error handling
 
-- Ollama unreachable → clear message to run `ollama serve`, abort
+- Ollama unreachable → clear message, abort
 - `Memory.md` missing → created from template automatically
-- Back-patch target file missing → logged and skipped (graceful)
-- Topic classification ambiguous → falls back to `## Uncategorized`
+- Topic folder missing → created automatically
+- Back-patch target missing → logged and skipped
+- Topic ambiguous → falls back to `## Uncategorized` / `uncategorized/` folder
 
 ## Style notes
 
-- Do NOT call the Claude/Anthropic API at any point — all LLM work goes through Ollama
-- Relative links only — keeps the vault portable across machines
-- Do not reproduce long code blocks in the summary; reference them by name/purpose
+- Do NOT call the Claude/Anthropic API — all LLM work goes through Ollama
+- All links are relative — portable across machines via GitHub sync
+- Do not reproduce long code blocks in summaries; reference by name/purpose

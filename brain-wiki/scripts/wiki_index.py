@@ -147,7 +147,7 @@ def backpatch_file(target_path: Path, new_entry_line: str, call_local_fn) -> boo
         f"Current file:\n\n{current}\n\n"
         f"New related page entry to add:\n{new_entry_line}"
     )
-    updated = call_local_fn(prompt, BACKPATCH_SYSTEM, timeout=180)
+    updated = call_local_fn(prompt, BACKPATCH_SYSTEM, timeout=timeout)
     target_path.write_text(updated, encoding="utf-8")
     print(f"  Back-patched: {target_path.name}")
     return True

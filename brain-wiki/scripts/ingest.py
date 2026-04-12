@@ -242,7 +242,7 @@ def _read_image(path: Path) -> str:
         cfg.llm_url, data=data,
         headers={"Content-Type": "application/json"}, method="POST",
     )
-    with _req.urlopen(request, timeout=120) as resp:
+    with _req.urlopen(request, timeout=cfg.timeout_short) as resp:
         return _json.loads(resp.read())["response"].strip()
 
 
@@ -263,7 +263,7 @@ def classify(content: str, memory_text: str, source_name: str) -> dict:
         f"Source content (first 3000 chars):\n{content[:3000]}\n\n"
         f"Current Memory.md:\n{memory_text}"
     )
-    raw = call_local(prompt, CLASSIFY_SYSTEM, timeout=120)
+    raw = call_local(prompt, CLASSIFY_SYSTEM, timeout=cfg.timeout_short)
     raw = re.sub(r"```[a-z]*\n?", "", raw).strip()
     try:
         return json.loads(raw)
@@ -314,10 +314,10 @@ def write_wiki_page(
             + f"Related existing pages (path|description):\n{related_block}\n\n"
             + f"Source content:\n{content[:8000]}"
         )
-        return call_local(prompt, WIKI_PAGE_WITH_RELATED_SYSTEM, timeout=300)
+        return call_local(prompt, WIKI_PAGE_WITH_RELATED_SYSTEM, timeout=cfg.timeout_long)
     else:
         prompt = base + f"Source content:\n{content[:8000]}"
-        return call_local(prompt, WIKI_PAGE_SYSTEM, timeout=300)
+        return call_local(prompt, WIKI_PAGE_SYSTEM, timeout=cfg.timeout_long)
 
 
 def merge_wiki_page(
@@ -333,7 +333,7 @@ def merge_wiki_page(
         f"Today: {today}\n\n"
         f"New session content:\n{new_content[:8000]}"
     )
-    return call_local(prompt, MERGE_SYSTEM, timeout=300)
+    return call_local(prompt, MERGE_SYSTEM, timeout=cfg.timeout_long)
 
 
 # ── Overview ──────────────────────────────────────────────────────────────────
@@ -345,10 +345,10 @@ def update_overview(overview_path: Path, page_content: str, topic: str):
             f"Current _overview.md:\n\n{current}\n\n"
             f"Page just added/updated in topic '{topic}':\n\n{page_content[:3000]}"
         )
-        updated = call_local(prompt, OVERVIEW_SYSTEM, timeout=180)
+        updated = call_local(prompt, OVERVIEW_SYSTEM, timeout=cfg.timeout_medium)
     else:
         prompt = f"Topic name: {topic}\n\nFirst page content:\n\n{page_content[:3000]}"
-        updated = call_local(prompt, OVERVIEW_INIT_SYSTEM, timeout=180)
+        updated = call_local(prompt, OVERVIEW_INIT_SYSTEM, timeout=cfg.timeout_medium)
     overview_path.write_text(updated, encoding="utf-8")
     print("  ✓ _overview.md updated")
 
@@ -506,7 +506,7 @@ def main():
                 rel = wiki_page_path
             # Display text = slug only, no date
             entry_for_old = f"- [{slug}]({rel}) — {description}"
-            backpatch_file(ex_path, entry_for_old, call_local)
+            backpatch_file(ex_path, entry_for_old, call_local, timeout=cfg.timeout_medium)
 
         for ex in existing_entries:
             ex_path = (cfg.vault_root / ex["path"]).resolve()
@@ -517,7 +517,7 @@ def main():
             # Display text = slug only (strip date from stem)
             ex_slug = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", Path(ex["path"]).stem)
             entry_for_new = f"- [{ex_slug}]({rel}) — {ex['description']}"
-            backpatch_file(wiki_page_path, entry_for_new, call_local)
+            backpatch_file(wiki_page_path, entry_for_new, call_local, timeout=cfg.timeout_medium)
 
     print(f"\n✅ Done — {topic} / {wiki_page_path.name}")
 

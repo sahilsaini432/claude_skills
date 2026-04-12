@@ -28,13 +28,19 @@ The skill always looks for its config at:
 
 ```dotenv
 BRAIN_VAULT_ROOT=E:\brain
-LOCAL_LLM_URL=http://localhost:11434/api/generate   # optional, this is the default
-LOCAL_LLM_MODEL=gemma4:31b                          # optional, this is the default
+
+# LLM connection — defaults shown, override for remote Ollama (e.g. Tailscale)
+LOCAL_LLM_URL=http://localhost:11434/api/generate
+LOCAL_LLM_MODEL=gemma4:31b
+
+# Timeouts in seconds — increase if Ollama is on a remote/slow machine
+LLM_TIMEOUT_SHORT=300    # classify, relevance, image reads
+LLM_TIMEOUT_MEDIUM=600   # overview, merge, backpatch
+LLM_TIMEOUT_LONG=900     # full wiki page generation
 ```
 
-Only `BRAIN_VAULT_ROOT` is required. The LLM settings default to Ollama on localhost
-if not set — override them if your Ollama runs on a different port or machine.
-Since the .env is at a fixed path, the skill works from any working directory.
+Only `BRAIN_VAULT_ROOT` is required. All other keys have sensible defaults.
+The timeouts are generous by default — lower them if Ollama is local and fast.
 
 ## Vault structure
 
@@ -93,7 +99,7 @@ python scripts/query.py "question" --save answer.md
 
 | Extension | Type | Handler |
 |---|---|---|
-| `.md` `.html` | Article / Chat | Text read |
+| `.md` `.html` | Article / Chat / Note | Text read |
 | `.txt` | Note | Text read |
 | `.pdf` | PDF | pymupdf text extraction |
 | `.jpg` `.png` `.webp` | Image | gemma4:31b vision |
@@ -113,7 +119,7 @@ for the transcript file in the next step.
 
 ### Step 2 — Dump the transcript
 Write every message in the current conversation directly into `raw/chats/` as
-`<slug>-<YYYY-MM-DD>.txt` where slug is a 2–5 word kebab-case summary of the session topic.
+`<slug>-<YYYY-MM-DD>.md` where slug is a 2–5 word kebab-case summary of the session topic.
 
 Format: one turn per line, prefixed with `USER:` or `ASSISTANT:`.
 Do NOT summarize or paraphrase — write the raw verbatim content.
@@ -127,7 +133,7 @@ cfg.ensure_dirs()
 transcript = '''USER: <exact message>
 ASSISTANT: <exact message>
 '''
-dest = cfg.raw_dir / 'chats' / '<slug>-<YYYY-MM-DD>.txt'
+dest = cfg.raw_dir / 'chats' / '<slug>-<YYYY-MM-DD>.md'
 dest.write_text(transcript, encoding='utf-8')
 print(dest)
 "

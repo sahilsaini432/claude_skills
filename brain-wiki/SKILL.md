@@ -23,7 +23,7 @@ pip install pymupdf          # for PDF ingestion
 
 The skill always looks for its config at:
 ```
-~/.claude/skills/brain-wiki/.env
+~/.claude/skills/.env
 ```
 
 ```dotenv
@@ -101,10 +101,52 @@ python scripts/query.py "question" --save answer.md
 
 ## Chat session ingest
 
-When triggered by "summarize this chat" / "save this conversation":
-1. Dump the current context to `/tmp/chat-transcript.txt` (USER: / ASSISTANT: format)
-2. Run: `python scripts/ingest.py /tmp/chat-transcript.txt`
-   The script detects `.txt` and routes it to `raw/chats/`
+When triggered by "summarize this chat", "save this conversation", "save this session",
+or any similar phrase — **always follow these exact steps, no shortcuts**:
+
+### Step 1 — Get the raw/chats path
+```bash
+python ~/.claude/skills/brain-wiki/scripts/ingest.py --raw-chats-path
+```
+This prints the full path to `raw/chats/` from your vault. Use it as the destination
+for the transcript file in the next step.
+
+### Step 2 — Dump the transcript
+Write every message in the current conversation directly into `raw/chats/` as
+`<slug>-<YYYY-MM-DD>.txt` where slug is a 2–5 word kebab-case summary of the session topic.
+
+Format: one turn per line, prefixed with `USER:` or `ASSISTANT:`.
+Do NOT summarize or paraphrase — write the raw verbatim content.
+
+```bash
+python -c "
+import pathlib, sys
+sys.path.insert(0, str(pathlib.Path.home() / '.claude/skills/brain-wiki/scripts'))
+from config import cfg
+cfg.ensure_dirs()
+transcript = '''USER: <exact message>
+ASSISTANT: <exact message>
+'''
+dest = cfg.raw_dir / 'chats' / '<slug>-<YYYY-MM-DD>.txt'
+dest.write_text(transcript, encoding='utf-8')
+print(dest)
+"
+```
+
+### Step 3 — Run ingest
+```bash
+python ~/.claude/skills/brain-wiki/scripts/ingest.py <path printed above>
+```
+
+The script will:
+- Detect it as a Chat type (USER:/ASSISTANT: pattern)
+- Copy the raw file to `raw/chats/`
+- Generate a wiki page via gemma4:31b
+- Show you a preview for approval
+- Write to `wiki/<topic>/`, update `Memory.md`, `log.md`, and cross-references
+
+**Do not write wiki pages directly** — always go through `ingest.py` so the raw
+source is archived, the log is updated, and cross-references are maintained.
 
 ## Additional references
 

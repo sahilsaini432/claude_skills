@@ -3,7 +3,7 @@
 config.py — Load .env and resolve vault paths and LLM settings.
 
 Looks for .env at a fixed location:
-    ~/.claude/skills/brain-wiki/.env
+    ~/.claude/skills/.env
 
 Exposes:
     cfg.vault_root   → Path   (BRAIN_VAULT_ROOT)
@@ -23,8 +23,7 @@ Exposes:
 import sys
 from pathlib import Path
 
-SKILL_NAME = "brain-wiki"
-ENV_PATH   = Path.home() / ".claude" / "skills" / SKILL_NAME / ".env"
+ENV_PATH = Path.home() / ".claude" / "skills" / ".env"
 
 _DEFAULT_LLM_URL   = "http://localhost:11434/api/generate"
 _DEFAULT_LLM_MODEL = "gemma4:31b"

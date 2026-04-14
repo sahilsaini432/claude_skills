@@ -30,6 +30,12 @@ import json
 import re
 import shutil
 import sys
+import sys, io
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 from datetime import date
 from pathlib import Path
 
@@ -37,8 +43,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config import cfg
 from llm import call_local
 from wiki_index import (
-    append_log, backpatch_file, get_topic_entries,
-    insert_entry, load_memory, slugify,
+    append_log,
+    backpatch_file,
+    get_topic_entries,
+    insert_entry,
+    load_memory,
+    slugify,
 )
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
@@ -174,6 +184,7 @@ Return ONLY markdown — no fences, no preamble.
 
 # ── Source readers ─────────────────────────────────────────────────────────────
 
+
 def read_source(source_path: Path) -> tuple[str, str]:
     """Returns (content_text, source_type)."""
     ext = source_path.suffix.lower()
@@ -182,9 +193,11 @@ def read_source(source_path: Path) -> tuple[str, str]:
         text = source_path.read_text(encoding="utf-8", errors="replace")
         if ext in {".txt", ".md"}:
             sample = text[:2000]
-            if ("USER:" in sample and "ASSISTANT:" in sample) or \
-               ("**User**" in sample and "**Assistant**" in sample) or \
-               ("**Human**" in sample and "**Claude**" in sample):
+            if (
+                ("USER:" in sample and "ASSISTANT:" in sample)
+                or ("**User**" in sample and "**Assistant**" in sample)
+                or ("**Human**" in sample and "**Claude**" in sample)
+            ):
                 return text, "Chat"
         return text, "Note" if ext == ".txt" else "Article"
 
@@ -195,9 +208,7 @@ def read_source(source_path: Path) -> tuple[str, str]:
         return _read_image(source_path), "Image"
 
     if ext in {".transcript", ".srt", ".vtt"}:
-        return _clean_transcript(
-            source_path.read_text(encoding="utf-8", errors="replace")
-        ), "Transcript"
+        return _clean_transcript(source_path.read_text(encoding="utf-8", errors="replace")), "Transcript"
 
     try:
         return source_path.read_text(encoding="utf-8", errors="replace"), "Note"
@@ -209,6 +220,7 @@ def read_source(source_path: Path) -> tuple[str, str]:
 def _read_pdf(path: Path) -> str:
     try:
         import pymupdf  # type: ignore
+
         doc = pymupdf.open(str(path))
         return "\n\n".join(page.get_text() for page in doc)
     except ImportError:
@@ -224,8 +236,7 @@ def _read_image(path: Path) -> str:
     with open(path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
 
-    ext_map = {".jpg": "jpeg", ".jpeg": "jpeg", ".png": "png",
-               ".webp": "webp", ".gif": "gif"}
+    ext_map = {".jpg": "jpeg", ".jpeg": "jpeg", ".png": "png", ".webp": "webp", ".gif": "gif"}
     mime = "image/" + ext_map.get(path.suffix.lower(), "jpeg")
 
     payload = {
@@ -239,8 +250,10 @@ def _read_image(path: Path) -> str:
     }
     data = _json.dumps(payload).encode()
     request = _req.Request(
-        cfg.llm_url, data=data,
-        headers={"Content-Type": "application/json"}, method="POST",
+        cfg.llm_url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
     with _req.urlopen(request, timeout=cfg.timeout_short) as resp:
         return _json.loads(resp.read())["response"].strip()
@@ -256,6 +269,7 @@ def _clean_transcript(text: str) -> str:
 
 
 # ── Classify ──────────────────────────────────────────────────────────────────
+
 
 def classify(content: str, memory_text: str, source_name: str) -> dict:
     prompt = (
@@ -281,6 +295,7 @@ def classify(content: str, memory_text: str, source_name: str) -> dict:
 
 # ── Duplicate detection ───────────────────────────────────────────────────────
 
+
 def find_existing_page(topic_dir: Path, slug: str) -> Path | None:
     """Return the first existing page whose filename starts with slug-, or None."""
     if not topic_dir.exists():
@@ -293,6 +308,7 @@ def find_existing_page(topic_dir: Path, slug: str) -> Path | None:
 
 # ── Write or merge wiki page ──────────────────────────────────────────────────
 
+
 def write_wiki_page(
     content: str,
     source_type: str,
@@ -300,14 +316,8 @@ def write_wiki_page(
     related_entries: list[dict],
     today: str,
 ) -> str:
-    related_block = "\n".join(
-        f"  {e['path']}|{e['description']}" for e in related_entries
-    )
-    base = (
-        f"Source type: {source_type}\n"
-        f"Source name: {source_name}\n"
-        f"Today: {today}\n\n"
-    )
+    related_block = "\n".join(f"  {e['path']}|{e['description']}" for e in related_entries)
+    base = f"Source type: {source_type}\n" f"Source name: {source_name}\n" f"Today: {today}\n\n"
     if related_entries:
         prompt = (
             base
@@ -338,6 +348,7 @@ def merge_wiki_page(
 
 # ── Overview ──────────────────────────────────────────────────────────────────
 
+
 def update_overview(overview_path: Path, page_content: str, topic: str):
     if overview_path.exists():
         current = overview_path.read_text(encoding="utf-8")
@@ -350,16 +361,16 @@ def update_overview(overview_path: Path, page_content: str, topic: str):
         prompt = f"Topic name: {topic}\n\nFirst page content:\n\n{page_content[:3000]}"
         updated = call_local(prompt, OVERVIEW_INIT_SYSTEM, timeout=cfg.timeout_medium)
     overview_path.write_text(updated, encoding="utf-8")
-    print("  ✓ _overview.md updated")
+    print("  [ok] _overview.md updated")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(description="Ingest a source into brain-wiki")
     parser.add_argument("source", nargs="?", help="Path to source file")
-    parser.add_argument("--raw-chats-path", action="store_true",
-                        help="Print the raw/chats/ path and exit")
+    parser.add_argument("--raw-chats-path", action="store_true", help="Print the raw/chats/ path and exit")
     args = parser.parse_args()
 
     cfg.ensure_dirs()
@@ -379,7 +390,7 @@ def main():
         print(f"Error: source file not found: {source_path}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"\n📥 Ingesting: {source_path.name}")
+    print(f"\n[ingest] Ingesting: {source_path.name}")
 
     # 1. Read source
     print("  Reading source...")
@@ -390,12 +401,12 @@ def main():
     print("  Classifying topic...")
     classification = classify(content, memory_text, source_path.name)
 
-    topic        = classification.get("topic", "Uncategorized")
-    description  = classification.get("description", source_path.stem)
+    topic = classification.get("topic", "Uncategorized")
+    description = classification.get("description", source_path.stem)
     is_new_topic = classification.get("is_new_topic", False)
-    slug         = classification.get("slug", re.sub(r"[^a-z0-9]+", "-", source_path.stem.lower())[:40])
+    slug = classification.get("slug", re.sub(r"[^a-z0-9]+", "-", source_path.stem.lower())[:40])
     topic_folder = slugify(topic)
-    topic_dir    = cfg.wiki_dir / topic_folder
+    topic_dir = cfg.wiki_dir / topic_folder
 
     print(f"  → Topic:  {topic!r} ({'new' if is_new_topic else 'existing'})")
     print(f"  → Slug:   {slug}")
@@ -413,29 +424,22 @@ def main():
     existing_entries = get_topic_entries(memory_text, topic)
     # Exclude the page we're merging into from cross-ref list
     if is_merge:
-        existing_entries = [
-            e for e in existing_entries
-            if not Path(e["path"]).name.startswith(slug + "-")
-        ]
+        existing_entries = [e for e in existing_entries if not Path(e["path"]).name.startswith(slug + "-")]
 
     # 5. Generate or merge wiki page
     if is_merge:
         print("  Merging with existing page (local model)...")
         existing_content = existing_page.read_text(encoding="utf-8")
-        wiki_page_content = merge_wiki_page(
-            existing_content, content, source_path.name, today
-        )
+        wiki_page_content = merge_wiki_page(existing_content, content, source_path.name, today)
         wiki_page_path = existing_page
     else:
         print("  Generating wiki page (local model)...")
-        wiki_page_content = write_wiki_page(
-            content, source_type, source_path.name, existing_entries, today
-        )
+        wiki_page_content = write_wiki_page(content, source_type, source_path.name, existing_entries, today)
         wiki_page_path = topic_dir / f"{slug}-{today}.md"
 
     # 6. Preview
     print("\n" + "─" * 60)
-    print(f"📄 WIKI PAGE {'MERGE' if is_merge else 'PREVIEW'}")
+    print(f"[preview] WIKI PAGE {'MERGE' if is_merge else 'PREVIEW'}")
     print("─" * 60)
     preview_lines = wiki_page_content.splitlines()[:40]
     print("\n".join(preview_lines))
@@ -455,12 +459,16 @@ def main():
     # 7. Write page
     topic_dir.mkdir(parents=True, exist_ok=True)
     wiki_page_path.write_text(wiki_page_content, encoding="utf-8")
-    print(f"\n  ✓ {'Merged' if is_merge else 'Written'}: {wiki_page_path.name}")
+    print(f"\n  [ok] {'Merged' if is_merge else 'Written'}: {wiki_page_path.name}")
 
     # 8. Copy source to raw/ if not already there
     raw_type_map = {
-        "Article": "articles", "Note": "notes", "PDF": "pdfs",
-        "Image": "images", "Transcript": "transcripts", "Chat": "chats",
+        "Article": "articles",
+        "Note": "notes",
+        "PDF": "pdfs",
+        "Image": "images",
+        "Transcript": "transcripts",
+        "Chat": "chats",
     }
     raw_subtype = raw_type_map.get(source_type, "notes")
     try:
@@ -474,9 +482,9 @@ def main():
         if raw_dest.exists():
             raw_dest = cfg.raw_dir / raw_subtype / f"{source_path.stem}-{today}{source_path.suffix}"
         shutil.copy2(source_path, raw_dest)
-        print(f"  ✓ Source copied to raw/{raw_subtype}/")
+        print(f"  [ok] Source copied to raw/{raw_subtype}/")
     else:
-        print("  ✓ Source already in raw/ — no copy needed")
+        print("  [ok] Source already in raw/ — no copy needed")
 
     # 9. Update _overview.md
     update_overview(topic_dir / "_overview.md", wiki_page_content, topic)
@@ -487,9 +495,9 @@ def main():
         memory_entry = f"- [{slug}]({rel_from_memory}) — {description}"
         updated_memory = insert_entry(memory_text, topic, memory_entry, today)
         cfg.memory_md.write_text(updated_memory, encoding="utf-8")
-        print("  ✓ Memory.md updated")
+        print("  [ok] Memory.md updated")
     else:
-        print("  ✓ Memory.md unchanged (merge into existing page)")
+        print("  [ok] Memory.md unchanged (merge into existing page)")
 
     # 11. Update log.md
     action = "merge" if is_merge else "ingest"
@@ -519,7 +527,7 @@ def main():
             entry_for_new = f"- [{ex_slug}]({rel}) — {ex['description']}"
             backpatch_file(wiki_page_path, entry_for_new, call_local, timeout=cfg.timeout_medium)
 
-    print(f"\n✅ Done — {topic} / {wiki_page_path.name}")
+    print(f"\n[done] Done — {topic} / {wiki_page_path.name}")
 
 
 if __name__ == "__main__":

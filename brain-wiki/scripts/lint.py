@@ -18,6 +18,12 @@ Checks:
 
 import re
 import sys
+import sys, io
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -100,8 +106,7 @@ def check_missing_crossrefs(memory_text: str) -> list[str]:
                     continue
                 if other.stem not in content:
                     issues.append(
-                        f"Missing cross-ref: {topic_dir.name}/{page.name} "
-                        f"doesn't link to {other.name}"
+                        f"Missing cross-ref: {topic_dir.name}/{page.name} " f"doesn't link to {other.name}"
                     )
     return issues
 
@@ -123,8 +128,7 @@ def scan_contradictions(memory_text: str) -> dict[str, str]:
         print(f"  Scanning '{topic_name}' ({len(pages)} pages)...")
 
         pages_block = "\n\n".join(
-            f"--- {p.name} ---\n{p.read_text(encoding='utf-8', errors='replace')[:1500]}"
-            for p in pages
+            f"--- {p.name} ---\n{p.read_text(encoding='utf-8', errors='replace')[:1500]}" for p in pages
         )
         prompt = f"Topic: {topic_name}\n\nPages:\n\n{pages_block}"
         report = call_local(prompt, CONTRADICTION_SYSTEM, timeout=cfg.timeout_medium)
@@ -160,67 +164,65 @@ Return ONLY markdown — no fences, no preamble.
         topic_dir = cfg.wiki_dir / folder_name
         pages = [f for f in topic_dir.glob("*.md") if f.name != "_overview.md"]
         pages_block = "\n\n".join(
-            f"--- {p.name} ---\n{p.read_text(encoding='utf-8', errors='replace')[:1000]}"
-            for p in pages
+            f"--- {p.name} ---\n{p.read_text(encoding='utf-8', errors='replace')[:1000]}" for p in pages
         )
         topic_name = folder_name.replace("-", " ").title()
         prompt = f"Topic: {topic_name}\n\nExisting pages:\n\n{pages_block}"
         content = call_local(prompt, OVERVIEW_INIT_SYSTEM, timeout=cfg.timeout_medium)
         overview_path = topic_dir / "_overview.md"
         overview_path.write_text(content, encoding="utf-8")
-        print(f"  ✓ Created _overview.md for: {folder_name}")
+        print(f"  [ok] Created _overview.md for: {folder_name}")
 
 
 def main():
     parser = __import__("argparse").ArgumentParser(description="Lint the brain-wiki")
-    parser.add_argument("--fix", action="store_true",
-                        help="Auto-fix missing overviews and cross-references")
+    parser.add_argument("--fix", action="store_true", help="Auto-fix missing overviews and cross-references")
     args = parser.parse_args()
 
     cfg.ensure_dirs()
     memory_text = load_memory(cfg.memory_md)
 
-    print("\n🔍 brain-wiki lint\n")
+    print("\n[search] brain-wiki lint\n")
     all_clear = True
 
     # 1. Dead links
     dead = check_dead_links(memory_text)
     if dead:
         all_clear = False
-        print(f"❌ Dead links ({len(dead)}):")
+        print(f"[error] Dead links ({len(dead)}):")
         for d in dead:
             print(f"   {d}")
     else:
-        print("✓  No dead links")
+        print("[ok]  No dead links")
 
     # 2. Orphans
     orphans = check_orphans(memory_text)
     if orphans:
         all_clear = False
-        print(f"\n❌ Orphan pages ({len(orphans)}) — in wiki/ but not in Memory.md:")
+        print(f"\n[error] Orphan pages ({len(orphans)}) — in wiki/ but not in Memory.md:")
         for o in orphans:
             print(f"   {o.relative_to(cfg.vault_root)}")
     else:
-        print("✓  No orphan pages")
+        print("[ok]  No orphan pages")
 
     # 3. Missing overviews
     missing_overviews = check_missing_overviews(memory_text)
     if missing_overviews:
         all_clear = False
-        print(f"\n❌ Missing _overview.md ({len(missing_overviews)}):")
+        print(f"\n[error] Missing _overview.md ({len(missing_overviews)}):")
         for m in missing_overviews:
             print(f"   {m}")
         if args.fix:
             print("  Auto-fixing...")
             fix_missing_overviews(missing_overviews)
     else:
-        print("✓  All topics have _overview.md")
+        print("[ok]  All topics have _overview.md")
 
     # 4. Missing cross-references
     missing_xrefs = check_missing_crossrefs(memory_text)
     if missing_xrefs:
         all_clear = False
-        print(f"\n⚠️  Missing cross-references ({len(missing_xrefs)}):")
+        print(f"\n[warn]  Missing cross-references ({len(missing_xrefs)}):")
         for x in missing_xrefs[:10]:  # cap at 10 to avoid noise
             print(f"   {x}")
         if len(missing_xrefs) > 10:
@@ -238,13 +240,13 @@ def main():
                         entry = f"- [{tgt.stem}]({rel}) — related page in same topic"
                         backpatch_file(src, entry, call_local, timeout=cfg.timeout_medium)
     else:
-        print("✓  All same-topic pages are cross-referenced")
+        print("[ok]  All same-topic pages are cross-referenced")
 
     # 5. LLM contradiction scan
-    print("\n🤖 Running contradiction scan (local model)...")
+    print("\n[llm] Running contradiction scan (local model)...")
     contradiction_reports = scan_contradictions(memory_text)
     if contradiction_reports:
-        print("\n📋 Contradiction / gap report:")
+        print("\n[report] Contradiction / gap report:")
         for topic, report in contradiction_reports.items():
             print(f"\n  [{topic}]")
             for line in report.splitlines():
@@ -255,9 +257,9 @@ def main():
     # Summary
     print("\n" + "─" * 60)
     if all_clear:
-        print("✅ Wiki looks healthy!")
+        print("[done] Wiki looks healthy!")
     else:
-        print("⚠️  Issues found above. Run with --fix to auto-resolve some.")
+        print("[warn]  Issues found above. Run with --fix to auto-resolve some.")
 
     append_log(cfg.log_md, "lint", "health check complete")
 

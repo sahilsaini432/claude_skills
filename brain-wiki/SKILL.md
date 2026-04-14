@@ -92,7 +92,7 @@ those wiki pages and prints them to stdout. Claude Code reads that output and sy
 the answer directly — no API call, no extra cost. To file the answer back:
 
 ```bash
-python scripts/query.py "question" --save answer.md
+python3 scripts/query.py "question" --save answer.md
 ```
 
 ## Supported source types
@@ -112,7 +112,7 @@ or any similar phrase — **always follow these exact steps, no shortcuts**:
 
 ### Step 1 — Get the raw/chats path
 ```bash
-python ~/.claude/skills/brain-wiki/scripts/ingest.py --raw-chats-path
+python3 ~/.claude/skills/brain-wiki/scripts/ingest.py --raw-chats-path
 ```
 This prints the full path to `raw/chats/` from your vault. Use it as the destination
 for the transcript file in the next step.
@@ -125,7 +125,7 @@ Format: one turn per line, prefixed with `USER:` or `ASSISTANT:`.
 Do NOT summarize or paraphrase — write the raw verbatim content.
 
 ```bash
-python -c "
+python3 -c "
 import pathlib, sys
 sys.path.insert(0, str(pathlib.Path.home() / '.claude/skills/brain-wiki/scripts'))
 from config import cfg
@@ -141,7 +141,7 @@ print(dest)
 
 ### Step 3 — Run ingest
 ```bash
-python ~/.claude/skills/brain-wiki/scripts/ingest.py <path printed above>
+python3 ~/.claude/skills/brain-wiki/scripts/ingest.py <path printed above>
 ```
 
 The script will:

@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 
 # Defaults — overridden by .env via config.py
-_DEFAULT_URL   = "http://localhost:11434/api/generate"
+_DEFAULT_URL = "http://localhost:11434/api/generate"
 _DEFAULT_MODEL = "gemma4:31b"
 
 
@@ -28,7 +28,8 @@ def call_local(prompt: str, system: str, timeout: int = 300) -> str:
     """Call the local LLM. URL and model are read from config (loaded from .env)."""
     # Import here to avoid circular import — config imports llm indirectly
     from config import cfg
-    url   = cfg.llm_url
+
+    url = cfg.llm_url
     model = cfg.llm_model
 
     payload = {
@@ -39,8 +40,10 @@ def call_local(prompt: str, system: str, timeout: int = 300) -> str:
     }
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        url, data=data,
-        headers={"Content-Type": "application/json"}, method="POST",
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:

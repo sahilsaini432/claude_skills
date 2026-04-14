@@ -33,11 +33,11 @@ from pathlib import Path
 
 ENV_PATH = Path.home() / ".claude" / "skills" / ".env"
 
-_DEFAULT_LLM_URL    = "http://localhost:11434/api/generate"
-_DEFAULT_LLM_MODEL  = "gemma4:31b"
-_DEFAULT_TIMEOUT_SHORT  = 300   # classify, relevance, image
-_DEFAULT_TIMEOUT_MEDIUM = 600   # overview, merge, backpatch, save-page
-_DEFAULT_TIMEOUT_LONG   = 900   # full wiki page generation
+_DEFAULT_LLM_URL = "http://localhost:11434/api/generate"
+_DEFAULT_LLM_MODEL = "gemma4:31b"
+_DEFAULT_TIMEOUT_SHORT = 300  # classify, relevance, image
+_DEFAULT_TIMEOUT_MEDIUM = 600  # overview, merge, backpatch, save-page
+_DEFAULT_TIMEOUT_LONG = 900  # full wiki page generation
 
 
 def _load_env(p: Path) -> dict:
@@ -67,19 +67,18 @@ class Config:
         root_str = env.get("BRAIN_VAULT_ROOT", "").strip()
         if not root_str:
             print(
-                f"Error: BRAIN_VAULT_ROOT not set in {ENV_PATH}\n"
-                f"Add:  BRAIN_VAULT_ROOT=E:\\brain",
+                f"Error: BRAIN_VAULT_ROOT not set in {ENV_PATH}\n" f"Add:  BRAIN_VAULT_ROOT=E:\\brain",
                 file=sys.stderr,
             )
             sys.exit(1)
 
         self.vault_root: Path = Path(root_str).expanduser().resolve()
-        self.memory_md:  Path = self.vault_root / "Memory.md"
-        self.log_md:     Path = self.vault_root / "log.md"
-        self.raw_dir:    Path = self.vault_root / "raw"
-        self.wiki_dir:   Path = self.vault_root / "wiki"
-        self.llm_url:    str  = env.get("LOCAL_LLM_URL",   _DEFAULT_LLM_URL).strip()
-        self.llm_model:  str  = env.get("LOCAL_LLM_MODEL", _DEFAULT_LLM_MODEL).strip()
+        self.memory_md: Path = self.vault_root / "Memory.md"
+        self.log_md: Path = self.vault_root / "log.md"
+        self.raw_dir: Path = self.vault_root / "raw"
+        self.wiki_dir: Path = self.vault_root / "wiki"
+        self.llm_url: str = env.get("LOCAL_LLM_URL", _DEFAULT_LLM_URL).strip()
+        self.llm_model: str = env.get("LOCAL_LLM_MODEL", _DEFAULT_LLM_MODEL).strip()
 
         def _int(key, default):
             try:
@@ -87,9 +86,9 @@ class Config:
             except ValueError:
                 return default
 
-        self.timeout_short:  int = _int("LLM_TIMEOUT_SHORT",  _DEFAULT_TIMEOUT_SHORT)
+        self.timeout_short: int = _int("LLM_TIMEOUT_SHORT", _DEFAULT_TIMEOUT_SHORT)
         self.timeout_medium: int = _int("LLM_TIMEOUT_MEDIUM", _DEFAULT_TIMEOUT_MEDIUM)
-        self.timeout_long:   int = _int("LLM_TIMEOUT_LONG",   _DEFAULT_TIMEOUT_LONG)
+        self.timeout_long: int = _int("LLM_TIMEOUT_LONG", _DEFAULT_TIMEOUT_LONG)
 
     def ensure_dirs(self):
         for d in [

@@ -46,6 +46,7 @@ Rules:
 
 # ── Memory.md ─────────────────────────────────────────────────────────────────
 
+
 def load_memory(memory_path: Path) -> str:
     if memory_path.exists():
         return memory_path.read_text(encoding="utf-8")
@@ -68,11 +69,13 @@ def get_topic_entries(memory_text: str, topic: str) -> list[dict]:
                 break
             m = re.match(r"-\s+\[([^\]]+)\]\(([^)]+)\)\s+[—-]+\s+(.*)", line)
             if m:
-                entries.append({
-                    "slug": m.group(1),
-                    "path": m.group(2),
-                    "description": m.group(3).strip(),
-                })
+                entries.append(
+                    {
+                        "slug": m.group(1),
+                        "path": m.group(2),
+                        "description": m.group(3).strip(),
+                    }
+                )
     return entries
 
 
@@ -89,8 +92,8 @@ def insert_entry(memory_text: str, topic: str, entry_line: str, today: str) -> s
     # New topic
     new_block = [f"\n{heading}", entry_line]
     footer_idx = next(
-        (i for i in range(len(lines) - 1, len(lines) // 2, -1)
-         if lines[i].strip() == "---"), None,
+        (i for i in range(len(lines) - 1, len(lines) // 2, -1) if lines[i].strip() == "---"),
+        None,
     )
     if footer_idx is not None:
         for j, l in enumerate(new_block):
@@ -117,6 +120,7 @@ def slugify(topic: str) -> str:
 
 # ── log.md ────────────────────────────────────────────────────────────────────
 
+
 def append_log(log_path: Path, operation: str, detail: str):
     """Append one line to log.md.
     Format: ## [YYYY-MM-DD HH:MM] operation | detail
@@ -132,7 +136,8 @@ def append_log(log_path: Path, operation: str, detail: str):
 
 # ── Back-patching ─────────────────────────────────────────────────────────────
 
-def backpatch_file(target_path: Path, new_entry_line: str, call_local_fn) -> bool:
+
+def backpatch_file(target_path: Path, new_entry_line: str, call_local_fn, timeout: int = 600) -> bool:
     """Add new_entry_line to target_path's Related Pages section.
     Returns True if file was modified.
     """
@@ -143,10 +148,7 @@ def backpatch_file(target_path: Path, new_entry_line: str, call_local_fn) -> boo
     slug_m = re.search(r"\[([^\]]+)\]", new_entry_line)
     if slug_m and slug_m.group(1) in current:
         return False  # already linked
-    prompt = (
-        f"Current file:\n\n{current}\n\n"
-        f"New related page entry to add:\n{new_entry_line}"
-    )
+    prompt = f"Current file:\n\n{current}\n\n" f"New related page entry to add:\n{new_entry_line}"
     updated = call_local_fn(prompt, BACKPATCH_SYSTEM, timeout=timeout)
     target_path.write_text(updated, encoding="utf-8")
     print(f"  Back-patched: {target_path.name}")

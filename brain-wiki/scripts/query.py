@@ -23,6 +23,12 @@ To file an answer back into the wiki:
 import argparse
 import re
 import sys
+import sys, io
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 from datetime import date
 from pathlib import Path
 
@@ -75,6 +81,7 @@ def find_relevant_topics(question: str, memory_text: str) -> list[str]:
     raw = re.sub(r"```[a-z]*\n?", "", raw).strip()
     try:
         import json
+
         result = json.loads(raw)
         topics = result.get("topics", [])
         reasoning = result.get("reasoning", "")
@@ -143,14 +150,17 @@ def save_answer(question: str, answer_file: Path):
     cfg.memory_md.write_text(updated, encoding="utf-8")
 
     append_log(cfg.log_md, "query-saved", f"{question[:60]} → {slug}.md")
-    print(f"✓ Answer filed: wiki/{topic_folder}/{slug}.md")
+    print(f"[ok] Answer filed: wiki/{topic_folder}/{slug}.md")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Retrieve wiki pages for a question")
     parser.add_argument("question", nargs="?", help="Your question")
-    parser.add_argument("--save", metavar="ANSWER_FILE",
-                        help="File an answer back into the wiki (provide answer as a .md file)")
+    parser.add_argument(
+        "--save",
+        metavar="ANSWER_FILE",
+        help="File an answer back into the wiki (provide answer as a .md file)",
+    )
     args = parser.parse_args()
 
     cfg.ensure_dirs()

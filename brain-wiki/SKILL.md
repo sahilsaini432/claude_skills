@@ -22,6 +22,7 @@ pip install pymupdf          # for PDF ingestion
 ## .env setup
 
 The skill always looks for its config at:
+
 ```
 ~/.claude/skills/.env
 ```
@@ -65,11 +66,11 @@ E:\brain\
 
 See `references/operations.md` for full details.
 
-| Command | What it does | Model |
-|---|---|---|
-| `ingest <file>` | Read source → generate wiki page → update index → cross-reference | gemma4:31b (local) |
-| `query "question"` | Load relevant pages → print for Claude Code to answer | gemma4:31b (topic finding) + Claude Code (answer) |
-| `lint` | Orphans, dead links, missing overviews, contradiction scan | gemma4:31b (local) |
+| Command            | What it does                                                      | Model                                             |
+| ------------------ | ----------------------------------------------------------------- | ------------------------------------------------- |
+| `ingest <file>`    | Read source → generate wiki page → update index → cross-reference | gemma4:31b (local)                                |
+| `query "question"` | Load relevant pages → print for Claude Code to answer             | gemma4:31b (topic finding) + Claude Code (answer) |
+| `lint`             | Orphans, dead links, missing overviews, contradiction scan        | gemma4:31b (local)                                |
 
 ## How to invoke in Claude Code
 
@@ -80,6 +81,7 @@ See `references/operations.md` for full details.
 ```
 
 Or naturally:
+
 - "Ingest this article" + paste path
 - "Add this chat to my wiki"
 - "What do I know about X?"
@@ -97,13 +99,13 @@ python3 scripts/query.py "question" --save answer.md
 
 ## Supported source types
 
-| Extension | Type | Handler |
-|---|---|---|
-| `.md` `.html` | Article / Chat / Note | Text read |
-| `.txt` | Note | Text read |
-| `.pdf` | PDF | pymupdf text extraction |
-| `.jpg` `.png` `.webp` | Image | gemma4:31b vision |
-| `.srt` `.vtt` `.transcript` | Transcript | Timestamp-stripped text |
+| Extension                   | Type                  | Handler                 |
+| --------------------------- | --------------------- | ----------------------- |
+| `.md` `.html`               | Article / Chat / Note | Text read               |
+| `.txt`                      | Note                  | Text read               |
+| `.pdf`                      | PDF                   | pymupdf text extraction |
+| `.jpg` `.png` `.webp`       | Image                 | gemma4:31b vision       |
+| `.srt` `.vtt` `.transcript` | Transcript            | Timestamp-stripped text |
 
 ## Chat session ingest
 
@@ -111,13 +113,16 @@ When triggered by "summarize this chat", "save this conversation", "save this se
 or any similar phrase — **always follow these exact steps, no shortcuts**:
 
 ### Step 1 — Get the raw/chats path
+
 ```bash
 python3 ~/.claude/skills/brain-wiki/scripts/ingest.py --raw-chats-path
 ```
+
 This prints the full path to `raw/chats/` from your vault. Use it as the destination
 for the transcript file in the next step.
 
 ### Step 2 — Dump the transcript
+
 Write every message in the current conversation directly into `raw/chats/` as
 `<slug>-<YYYY-MM-DD>.md` where slug is a 2–5 word kebab-case summary of the session topic.
 
@@ -140,11 +145,16 @@ print(dest)
 ```
 
 ### Step 3 — Run ingest
+
 ```bash
-python3 ~/.claude/skills/brain-wiki/scripts/ingest.py <path printed above>
+python3 ~/.claude/skills/brain-wiki/scripts/ingest.py <path printed above> --yes
 ```
 
+Always pass `--yes` when running from Claude Code — the script cannot accept interactive
+input. The generated page preview is still printed to the log for you to review.
+
 The script will:
+
 - Detect it as a Chat type (USER:/ASSISTANT: pattern)
 - Copy the raw file to `raw/chats/`
 - Generate a wiki page via gemma4:31b

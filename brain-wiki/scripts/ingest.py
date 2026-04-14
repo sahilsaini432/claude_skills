@@ -371,6 +371,9 @@ def main():
     parser = argparse.ArgumentParser(description="Ingest a source into brain-wiki")
     parser.add_argument("source", nargs="?", help="Path to source file")
     parser.add_argument("--raw-chats-path", action="store_true", help="Print the raw/chats/ path and exit")
+    parser.add_argument(
+        "--yes", "-y", action="store_true", help="Skip confirmation prompt and auto-approve (for Claude Code)"
+    )
     args = parser.parse_args()
 
     cfg.ensure_dirs()

@@ -78,6 +78,7 @@ class Config:
         self.raw_dir: Path = self.vault_root / "raw"
         self.wiki_dir: Path = self.vault_root / "wiki"
         self.llm_url: str = env.get("LOCAL_LLM_URL", _DEFAULT_LLM_URL).strip()
+        self.entity_dir: Path = self.vault_root / "wiki" / "_entities"
         self.llm_model: str = env.get("LOCAL_LLM_MODEL", _DEFAULT_LLM_MODEL).strip()
 
         def _int(key, default):
@@ -99,6 +100,7 @@ class Config:
             self.raw_dir / "notes",
             self.raw_dir / "chats",
             self.wiki_dir,
+            self.entity_dir,
         ]:
             d.mkdir(parents=True, exist_ok=True)
 

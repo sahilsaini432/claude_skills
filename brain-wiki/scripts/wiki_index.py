@@ -44,6 +44,15 @@ Rules:
 """
 
 
+def posix_rel(path) -> str:
+    """Return a path string with forward slashes — safe for markdown links on Windows."""
+    from pathlib import Path
+
+    if isinstance(path, Path):
+        return path.as_posix()
+    return str(path).replace("\\", "/")
+
+
 # ── Memory.md ─────────────────────────────────────────────────────────────────
 
 

@@ -49,6 +49,7 @@ The timeouts are generous by default — lower them if Ollama is local and fast.
 E:\brain\
 ├── Memory.md                    ← master index, grouped by topic
 ├── log.md                       ← append-only operation history
+├── entity_registry.json         ← tracks entity appearance counts
 ├── raw/                         ← immutable source files (never modified)
 │   ├── articles/
 │   ├── pdfs/
@@ -57,9 +58,12 @@ E:\brain\
 │   ├── notes/
 │   └── chats/
 └── wiki/                        ← LLM-owned wiki pages
+    ├── _entities/               ← shared entity/concept pages (cross-topic)
+    │   ├── sdl2.md              ← created on 2nd appearance across any source
+    │   └── reinforcement-learning.md
     └── <topic-folder>/
         ├── _overview.md         ← living topic synthesis
-        └── <slug>-YYYY-MM-DD.md
+        └── <slug>-YYYY-MM-DD.md ← links to relevant _entities/ pages
 ```
 
 ## Three operations
@@ -71,6 +75,21 @@ See `references/operations.md` for full details.
 | `ingest <file>`    | Read source → generate wiki page → update index → cross-reference | gemma4:26b (local)                                |
 | `query "question"` | Load relevant pages → print for Claude Code to answer             | gemma4:26b (topic finding) + Claude Code (answer) |
 | `lint`             | Orphans, dead links, missing overviews, contradiction scan        | gemma4:26b (local)                                |
+
+## Entity system
+
+After writing each wiki page, `ingest.py` automatically:
+
+1. **Extracts entities** — asks `gemma4:26b` to identify significant tools, frameworks,
+   algorithms, people, and concepts from the source (3–8 per source, quality over quantity)
+2. **Updates `entity_registry.json`** — tracks how many times each entity has been seen
+3. **Creates entity pages on 2nd appearance** — `wiki/_entities/<slug>.md` is created
+   the second time an entity appears, back-filled with content from both sources
+4. **Updates entity pages on subsequent appearances** — new facts merged in, count updated
+5. **Cross-links** — source wiki pages link to relevant entity pages and vice versa
+
+Entity pages live in `wiki/_entities/` so they appear as hubs in Obsidian's graph view,
+visually connecting all topics that reference the same tool or concept.
 
 ## How to invoke in Claude Code
 

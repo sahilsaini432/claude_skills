@@ -242,7 +242,37 @@ def main():
     else:
         print("[ok]  All same-topic pages are cross-referenced")
 
-    # 5. LLM contradiction scan
+    # 5. Entity registry health check
+    registry_path = cfg.vault_root / "entity_registry.json"
+    if registry_path.exists():
+        import json as _json
+
+        registry = _json.loads(registry_path.read_text(encoding="utf-8"))
+        entity_dir = cfg.wiki_dir / "_entities"
+        orphan_entities = []
+        missing_pages = []
+        for slug, entry in registry.items():
+            count = entry.get("count", 0)
+            page = entity_dir / f"{slug}.md"
+            if count >= 2 and not page.exists():
+                missing_pages.append(f"{entry['name']} (seen {count}x) — page missing")
+            if count < 2 and page.exists():
+                orphan_entities.append(f"{slug}.md — entity page exists but seen <2 times")
+        if missing_pages:
+            all_clear = False
+            print(f"\n[error] Entity pages missing ({len(missing_pages)}):")
+            for m in missing_pages:
+                print(f"   {m}")
+        else:
+            print("[ok]  Entity registry consistent")
+        if orphan_entities:
+            print(f"\n[warn] Entity pages with low reference count ({len(orphan_entities)}):")
+            for o in orphan_entities:
+                print(f"   {o}")
+    else:
+        print("[ok]  No entity registry yet (will be created on first ingest)")
+
+    # 6. LLM contradiction scan
     print("\n[llm] Running contradiction scan (local model)...")
     contradiction_reports = scan_contradictions(memory_text)
     if contradiction_reports:

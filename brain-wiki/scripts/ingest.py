@@ -23,6 +23,8 @@ Flow:
     6. Update / create topic _overview.md
     7. Update Memory.md and log.md
     8. Back-patch related pages in the same topic
+    9. Extract entities → update registry → create/update entity pages
+    10. Cross-link source page ↔ entity pages
 """
 
 import argparse
@@ -49,6 +51,13 @@ from wiki_index import (
     insert_entry,
     load_memory,
     slugify,
+    posix_rel,
+)
+from entities import (
+    extract_entities,
+    process_entities,
+    link_entity_pages_to_source,
+    link_source_to_entity_pages,
 )
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
@@ -356,10 +365,10 @@ def update_overview(overview_path: Path, page_content: str, topic: str):
             f"Current _overview.md:\n\n{current}\n\n"
             f"Page just added/updated in topic '{topic}':\n\n{page_content[:3000]}"
         )
-        updated = call_local(prompt, OVERVIEW_SYSTEM, timeout=cfg.timeout_medium)
+        updated = call_local(prompt, OVERVIEW_SYSTEM, timeout=cfg.timeout_long)
     else:
         prompt = f"Topic name: {topic}\n\nFirst page content:\n\n{page_content[:3000]}"
-        updated = call_local(prompt, OVERVIEW_INIT_SYSTEM, timeout=cfg.timeout_medium)
+        updated = call_local(prompt, OVERVIEW_INIT_SYSTEM, timeout=cfg.timeout_long)
     overview_path.write_text(updated, encoding="utf-8")
     print("  [ok] _overview.md updated")
 
@@ -496,7 +505,7 @@ def main():
     update_overview(topic_dir / "_overview.md", wiki_page_content, topic)
 
     # 10. Update Memory.md — use slug as display text (no date), keep dated filename
-    rel_from_memory = wiki_page_path.relative_to(cfg.vault_root)
+    rel_from_memory = posix_rel(wiki_page_path.relative_to(cfg.vault_root))
     if not is_merge:
         memory_entry = f"- [{slug}]({rel_from_memory}) — {description}"
         updated_memory = insert_entry(memory_text, topic, memory_entry, today)
@@ -519,8 +528,8 @@ def main():
             except ValueError:
                 rel = wiki_page_path
             # Display text = slug only, no date
-            entry_for_old = f"- [{slug}]({rel}) — {description}"
-            backpatch_file(ex_path, entry_for_old, call_local, timeout=cfg.timeout_medium)
+            entry_for_old = f"- [{slug}]({posix_rel(rel)}) — {description}"
+            backpatch_file(ex_path, entry_for_old, call_local, timeout=cfg.timeout_long)
 
         for ex in existing_entries:
             ex_path = (cfg.vault_root / ex["path"]).resolve()
@@ -530,8 +539,40 @@ def main():
                 rel = ex_path
             # Display text = slug only (strip date from stem)
             ex_slug = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", Path(ex["path"]).stem)
-            entry_for_new = f"- [{ex_slug}]({rel}) — {ex['description']}"
-            backpatch_file(wiki_page_path, entry_for_new, call_local, timeout=cfg.timeout_medium)
+            entry_for_new = f"- [{ex_slug}]({posix_rel(rel)}) — {ex['description']}"
+            backpatch_file(wiki_page_path, entry_for_new, call_local, timeout=cfg.timeout_long)
+
+    # 13. Entity extraction and page management
+    print("\n  Extracting entities (local model)...")
+    entities = extract_entities(content, source_path.name)
+    if entities:
+        print(f"  Found {len(entities)} entities: {', '.join(e['name'] for e in entities)}")
+        entity_pages = process_entities(
+            entities,
+            content,
+            slug,
+            wiki_page_path,
+            today,
+        )
+        # Cross-link source page <-> entity pages
+        if entity_pages:
+            print(f"  Linking {len(entity_pages)} entity page(s)...")
+            link_entity_pages_to_source(
+                wiki_page_path,
+                entity_pages,
+                call_local,
+                timeout=cfg.timeout_long,
+            )
+            link_source_to_entity_pages(
+                wiki_page_path,
+                slug,
+                description,
+                entity_pages,
+                call_local,
+                timeout=cfg.timeout_long,
+            )
+    else:
+        print("  No significant entities found.")
 
     print(f"\n[done] Done — {topic} / {wiki_page_path.name}")
 

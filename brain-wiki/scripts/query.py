@@ -35,7 +35,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from config import cfg
 from llm import call_local
-from wiki_index import append_log, insert_entry, load_memory, slugify
+from wiki_index import append_log, insert_entry, load_memory, slugify, posix_rel
 
 RELEVANCE_SYSTEM = """\
 You are a search assistant for a personal knowledge wiki.
@@ -144,7 +144,7 @@ def save_answer(question: str, answer_file: Path):
     page_path.write_text(page_content, encoding="utf-8")
 
     memory_text = load_memory(cfg.memory_md)
-    rel = page_path.relative_to(cfg.vault_root)
+    rel = posix_rel(page_path.relative_to(cfg.vault_root))
     memory_entry = f"- [{slug}]({rel}) — Q: {question[:60]}"
     updated = insert_entry(memory_text, topic, memory_entry, today)
     cfg.memory_md.write_text(updated, encoding="utf-8")

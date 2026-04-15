@@ -6,11 +6,11 @@
 
 ### Flow
 1. **Read source** — detected by file extension, routed to the right reader
-2. **Classify** — `gemma4:31b` reads the content + `Memory.md` and returns:
+2. **Classify** — `gemma4:26b` reads the content + `Memory.md` and returns:
    - `topic` — existing or new topic group name
    - `description` — one-line summary (≤12 words)
    - `slug` — 2–5 word kebab-case filename base
-3. **Generate wiki page** — `gemma4:31b` writes a structured page including Summary,
+3. **Generate wiki page** — `gemma4:26b` writes a structured page including Summary,
    Key Points, Concepts & Entities, Quotes/Highlights, Connections, Related Pages
 4. **Show preview** — first 40 lines shown, user confirms [Y/n/edit]
 5. **Write to disk** — `wiki/<topic-folder>/<slug>-YYYY-MM-DD.md`
@@ -28,7 +28,7 @@
 **Script:** `scripts/query.py "question" [--save <answer_file>]`
 
 ### Flow
-1. **Find relevant topics** — `gemma4:31b` reads `Memory.md` and identifies which
+1. **Find relevant topics** — `gemma4:26b` reads `Memory.md` and identifies which
    topic sections are likely to contain the answer
 2. **Load pages** — all pages from relevant topics loaded (capped at ~2000 chars each)
    plus topic `_overview.md` files
@@ -58,7 +58,7 @@ If no relevant pages are found, the script says so clearly and suggests:
 2. **Orphan pages** — files in `wiki/` not indexed in `Memory.md`
 3. **Missing `_overview.md`** — topic folders with pages but no overview
 4. **Missing cross-references** — pages in the same topic not linked to each other
-5. **Contradiction scan** — `gemma4:31b` reads all pages per topic and flags:
+5. **Contradiction scan** — `gemma4:26b` reads all pages per topic and flags:
    - Factual contradictions between pages
    - Claims superseded by newer pages
    - Important concepts mentioned but lacking their own page

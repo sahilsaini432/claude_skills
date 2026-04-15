@@ -13,7 +13,7 @@ Checks:
     3. Missing cross-references — pages in the same topic not linked to each other
     4. Stale _overview.md — topic has pages but no overview
     5. Empty topics — topic folder exists but has no pages
-    6. LLM contradiction scan — asks gemma4:31b to flag contradictions across topic pages
+    6. LLM contradiction scan — asks gemma4:26b to flag contradictions across topic pages
 """
 
 import re

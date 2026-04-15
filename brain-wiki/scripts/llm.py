@@ -9,7 +9,7 @@ call_local(prompt, system, timeout)  → str
 
 Reads connection settings from config (which loads .env):
     LOCAL_LLM_URL=http://localhost:11434/api/generate
-    LOCAL_LLM_MODEL=gemma4:31b
+    LOCAL_LLM_MODEL=gemma4:26b
 
 All LLM work in brain-wiki runs locally. No API keys required.
 Queries are synthesized by Claude Code directly from printed wiki context.
@@ -21,7 +21,7 @@ import urllib.request
 
 # Defaults — overridden by .env via config.py
 _DEFAULT_URL = "http://localhost:11434/api/generate"
-_DEFAULT_MODEL = "gemma4:31b"
+_DEFAULT_MODEL = "gemma4:26b"
 
 
 def call_local(prompt: str, system: str, timeout: int = 300) -> str:

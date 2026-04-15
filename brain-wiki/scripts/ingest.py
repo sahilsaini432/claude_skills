@@ -454,10 +454,13 @@ def main():
     print(f"Mode:    {'merge into existing' if is_merge else 'create new'}")
     print(f"Summary: {description}")
 
-    answer = input("\nLooks good? [Y/n]: ").strip().lower()
-    if answer == "n":
-        print("Aborted — nothing written.")
-        sys.exit(0)
+    if args.yes:
+        print("\n[auto-approved via --yes]")
+    else:
+        answer = input("\nLooks good? [Y/n]: ").strip().lower()
+        if answer == "n":
+            print("Aborted -- nothing written.")
+            sys.exit(0)
 
     # 7. Write page
     topic_dir.mkdir(parents=True, exist_ok=True)

@@ -9,7 +9,7 @@ Usage:
                     response into the wiki as a new page.
 
 This script does NOT call any LLM API for the answer. Instead it:
-  1. Uses gemma4:31b (local) to find which topics are relevant
+  1. Uses gemma4:26b (local) to find which topics are relevant
   2. Loads those wiki pages
   3. Prints them to stdout in a structured format
 

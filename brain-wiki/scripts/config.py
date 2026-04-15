@@ -20,7 +20,7 @@ Exposes:
 .env keys:
     BRAIN_VAULT_ROOT=E:\brain                           # required
     LOCAL_LLM_URL=http://localhost:11434/api/generate   # optional
-    LOCAL_LLM_MODEL=gemma4:31b                          # optional
+    LOCAL_LLM_MODEL=gemma4:26b                          # optional
     LLM_TIMEOUT_SHORT=300                               # optional, default 300s
     LLM_TIMEOUT_MEDIUM=600                              # optional, default 600s
     LLM_TIMEOUT_LONG=900                                # optional, default 900s
@@ -34,7 +34,7 @@ from pathlib import Path
 ENV_PATH = Path.home() / ".claude" / "skills" / ".env"
 
 _DEFAULT_LLM_URL = "http://localhost:11434/api/generate"
-_DEFAULT_LLM_MODEL = "gemma4:31b"
+_DEFAULT_LLM_MODEL = "gemma4:26b"
 _DEFAULT_TIMEOUT_SHORT = 300  # classify, relevance, image
 _DEFAULT_TIMEOUT_MEDIUM = 600  # overview, merge, backpatch, save-page
 _DEFAULT_TIMEOUT_LONG = 900  # full wiki page generation

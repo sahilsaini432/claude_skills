@@ -8,14 +8,14 @@ description: Personal knowledge wiki builder. Ingests any source (PDF, web artic
 A personal knowledge wiki that compiles and maintains structured, interlinked markdown pages
 from any source you feed it. Lives in your Obsidian vault. Syncs to GitHub automatically.
 
-All LLM work runs locally via `gemma4:31b` (Ollama) — no API keys, no cloud calls.
+All LLM work runs locally via `gemma4:26b` (Ollama) — no API keys, no cloud calls.
 Queries are answered by Claude Code itself, reading the relevant pages directly.
 
 ## Prerequisites
 
 ```bash
 ollama serve
-ollama pull gemma4:31b
+ollama pull gemma4:26b
 pip install pymupdf          # for PDF ingestion
 ```
 
@@ -32,7 +32,7 @@ BRAIN_VAULT_ROOT=E:\brain
 
 # LLM connection — defaults shown, override for remote Ollama (e.g. Tailscale)
 LOCAL_LLM_URL=http://localhost:11434/api/generate
-LOCAL_LLM_MODEL=gemma4:31b
+LOCAL_LLM_MODEL=gemma4:26b
 
 # Timeouts in seconds — increase if Ollama is on a remote/slow machine
 LLM_TIMEOUT_SHORT=300    # classify, relevance, image reads
@@ -68,9 +68,9 @@ See `references/operations.md` for full details.
 
 | Command            | What it does                                                      | Model                                             |
 | ------------------ | ----------------------------------------------------------------- | ------------------------------------------------- |
-| `ingest <file>`    | Read source → generate wiki page → update index → cross-reference | gemma4:31b (local)                                |
-| `query "question"` | Load relevant pages → print for Claude Code to answer             | gemma4:31b (topic finding) + Claude Code (answer) |
-| `lint`             | Orphans, dead links, missing overviews, contradiction scan        | gemma4:31b (local)                                |
+| `ingest <file>`    | Read source → generate wiki page → update index → cross-reference | gemma4:26b (local)                                |
+| `query "question"` | Load relevant pages → print for Claude Code to answer             | gemma4:26b (topic finding) + Claude Code (answer) |
+| `lint`             | Orphans, dead links, missing overviews, contradiction scan        | gemma4:26b (local)                                |
 
 ## How to invoke in Claude Code
 
@@ -89,7 +89,7 @@ Or naturally:
 
 ## How query works in Claude Code
 
-`query.py` uses gemma4:31b only to identify which topics are relevant, then loads
+`query.py` uses gemma4:26b only to identify which topics are relevant, then loads
 those wiki pages and prints them to stdout. Claude Code reads that output and synthesizes
 the answer directly — no API call, no extra cost. To file the answer back:
 
@@ -104,7 +104,7 @@ python3 scripts/query.py "question" --save answer.md
 | `.md` `.html`               | Article / Chat / Note | Text read               |
 | `.txt`                      | Note                  | Text read               |
 | `.pdf`                      | PDF                   | pymupdf text extraction |
-| `.jpg` `.png` `.webp`       | Image                 | gemma4:31b vision       |
+| `.jpg` `.png` `.webp`       | Image                 | gemma4:26b vision       |
 | `.srt` `.vtt` `.transcript` | Transcript            | Timestamp-stripped text |
 
 ## Chat session ingest
@@ -157,7 +157,7 @@ The script will:
 
 - Detect it as a Chat type (USER:/ASSISTANT: pattern)
 - Copy the raw file to `raw/chats/`
-- Generate a wiki page via gemma4:31b
+- Generate a wiki page via gemma4:26b
 - Show you a preview for approval
 - Write to `wiki/<topic>/`, update `Memory.md`, `log.md`, and cross-references
 

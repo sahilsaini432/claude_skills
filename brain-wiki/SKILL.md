@@ -172,6 +172,11 @@ python3 ~/.claude/skills/brain-wiki/scripts/ingest.py <path printed above> --yes
 Always pass `--yes` when running from Claude Code — the script cannot accept interactive
 input. The generated page preview is still printed to the log for you to review.
 
+The script automatically pings the local model before starting to ensure it is loaded
+into GPU memory. If the model is cold this may take up to 15 minutes — the script will
+print "Pinging local model..." and wait. Once it responds with "Model ready" the ingest
+proceeds. Pass `--no-ping` to skip the warm-up if you know the model is already loaded.
+
 The script will:
 
 - Detect it as a Chat type (USER:/ASSISTANT: pattern)

@@ -60,6 +60,45 @@ from entities import (
     link_source_to_entity_pages,
 )
 
+
+# ── Model warm-up ─────────────────────────────────────────────────────────────
+
+
+def ping_model() -> bool:
+    """Send a minimal prompt to warm up the local model.
+    Blocks until a response is received — may take up to 15 mins on cold start.
+    Returns True on success, False on failure.
+    """
+    import urllib.request, urllib.error
+
+    print("  Pinging local model to ensure it is loaded...")
+    print("  (This may take up to 15 mins if the model is cold — please wait)")
+    payload = json.dumps(
+        {
+            "model": cfg.llm_model,
+            "prompt": "ping",
+            "system": "Reply with only the word: pong",
+            "stream": False,
+            "options": {"temperature": 0.0, "num_predict": 5},
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        cfg.llm_url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=cfg.timeout_long) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+            response = result.get("response", "").strip()
+            print(f"  Model ready. (response: {response!r})")
+            return True
+    except Exception as e:
+        print(f"  [error] Ping failed: {e}", file=sys.stderr)
+        return False
+
+
 # ── Prompts ───────────────────────────────────────────────────────────────────
 
 CLASSIFY_SYSTEM = """\
@@ -383,6 +422,9 @@ def main():
     parser.add_argument(
         "--yes", "-y", action="store_true", help="Skip confirmation prompt and auto-approve (for Claude Code)"
     )
+    parser.add_argument(
+        "--no-ping", action="store_true", help="Skip model warm-up ping (use if model is already loaded)"
+    )
     args = parser.parse_args()
 
     cfg.ensure_dirs()
@@ -401,6 +443,12 @@ def main():
     if not source_path.exists():
         print(f"Error: source file not found: {source_path}", file=sys.stderr)
         sys.exit(1)
+
+    # Warm up model before doing anything else
+    if not args.no_ping:
+        if not ping_model():
+            print("Error: could not reach local model. Check Ollama is running.", file=sys.stderr)
+            sys.exit(1)
 
     print(f"\n[ingest] Ingesting: {source_path.name}")
 

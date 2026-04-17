@@ -172,10 +172,17 @@ python3 ~/.claude/skills/brain-wiki/scripts/ingest.py <path printed above> --yes
 Always pass `--yes` when running from Claude Code — the script cannot accept interactive
 input. The generated page preview is still printed to the log for you to review.
 
-The script automatically pings the local model before starting to ensure it is loaded
-into GPU memory. If the model is cold this may take up to 15 minutes — the script will
-print "Pinging local model..." and wait. Once it responds with "Model ready" the ingest
-proceeds. Pass `--no-ping` to skip the warm-up if you know the model is already loaded.
+The script automatically warms up the local model before starting:
+
+1. Sends `keep_alive=0` to Ollama to evict the model from VRAM (clean slate)
+2. Sends a minimal ping prompt to force a fresh load into GPU memory
+3. Waits for the response — may take up to 15 mins on cold start
+4. Prints "Model ready" then proceeds with ingest
+
+Flags to control this behaviour:
+
+- `--no-ping` — skip warm-up entirely (model must already be loaded)
+- `--no-unload` — ping without evicting first (faster if model is already warm)
 
 The script will:
 

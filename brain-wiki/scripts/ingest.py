@@ -64,21 +64,70 @@ from entities import (
 # ── Model warm-up ─────────────────────────────────────────────────────────────
 
 
+def _ollama_base_url() -> str:
+    """Derive the Ollama base URL from the generate endpoint."""
+    # e.g. http://192.168.1.5:11434/api/generate -> http://192.168.1.5:11434
+    url = cfg.llm_url
+    if "/api/" in url:
+        return url.split("/api/")[0]
+    return "http://localhost:11434"
+
+
+def unload_model() -> bool:
+    """Unload the model from GPU memory via Ollama API (keep_alive=0).
+    This forces a clean reload on the next ping.
+    Returns True on success, False if the unload call failed (non-fatal).
+    """
+    import urllib.request, urllib.error
+
+    base = _ollama_base_url()
+    url = f"{base}/api/generate"
+    payload = json.dumps(
+        {
+            "model": cfg.llm_model,
+            "prompt": "",
+            "keep_alive": 0,
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            resp.read()
+        print(f"  Model unloaded from GPU memory.")
+        return True
+    except Exception as e:
+        # Non-fatal — model may not have been loaded, or Ollama version doesn't support it
+        print(f"  [warn] Could not unload model (non-fatal): {e}", file=sys.stderr)
+        return False
+
+
 def ping_model() -> bool:
-    """Send a minimal prompt to warm up the local model.
-    Blocks until a response is received — may take up to 15 mins on cold start.
+    """Unload then reload the model to guarantee a clean warm-up.
+    1. Sends keep_alive=0 to evict the model from VRAM
+    2. Sends a minimal prompt to force a fresh load
+    Blocks until the model responds — may take up to 15 mins on cold start.
     Returns True on success, False on failure.
     """
     import urllib.request, urllib.error
 
-    print("  Pinging local model to ensure it is loaded...")
-    print("  (This may take up to 15 mins if the model is cold — please wait)")
+    # Step 1 — unload
+    print("  Unloading model from GPU memory...")
+    unload_model()
+
+    # Step 2 — reload via ping
+    print("  Loading model... (may take up to 15 mins on first load)")
     payload = json.dumps(
         {
             "model": cfg.llm_model,
             "prompt": "ping",
             "system": "Reply with only the word: pong",
             "stream": False,
+            "keep_alive": -1,
             "options": {"temperature": 0.0, "num_predict": 5},
         }
     ).encode("utf-8")
@@ -423,7 +472,10 @@ def main():
         "--yes", "-y", action="store_true", help="Skip confirmation prompt and auto-approve (for Claude Code)"
     )
     parser.add_argument(
-        "--no-ping", action="store_true", help="Skip model warm-up ping (use if model is already loaded)"
+        "--no-ping", action="store_true", help="Skip model warm-up entirely (use if model is already loaded)"
+    )
+    parser.add_argument(
+        "--no-unload", action="store_true", help="Ping to warm up but skip the unload step first"
     )
     args = parser.parse_args()
 
@@ -446,9 +498,35 @@ def main():
 
     # Warm up model before doing anything else
     if not args.no_ping:
-        if not ping_model():
-            print("Error: could not reach local model. Check Ollama is running.", file=sys.stderr)
-            sys.exit(1)
+        if args.no_unload:
+            # Skip eviction — just ping to ensure model is loaded
+            print("  Skipping unload — pinging model directly...")
+            import urllib.request as _ur
+
+            _payload = json.dumps(
+                {
+                    "model": cfg.llm_model,
+                    "prompt": "ping",
+                    "system": "Reply with only the word: pong",
+                    "stream": False,
+                    "keep_alive": -1,
+                    "options": {"temperature": 0.0, "num_predict": 5},
+                }
+            ).encode("utf-8")
+            _req = _ur.Request(
+                cfg.llm_url, data=_payload, headers={"Content-Type": "application/json"}, method="POST"
+            )
+            try:
+                with _ur.urlopen(_req, timeout=cfg.timeout_long) as _resp:
+                    _r = json.loads(_resp.read())
+                    print(f"  Model ready. (response: {_r.get('response','').strip()!r})")
+            except Exception as _e:
+                print(f"Error: could not reach local model: {_e}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            if not ping_model():
+                print("Error: could not reach local model. Check Ollama is running.", file=sys.stderr)
+                sys.exit(1)
 
     print(f"\n[ingest] Ingesting: {source_path.name}")
 

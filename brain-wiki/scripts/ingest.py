@@ -97,7 +97,6 @@ def unload_model() -> bool:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             resp.read()
-        print(f"  Model unloaded from GPU memory.")
         return True
     except Exception as e:
         # Non-fatal — model may not have been loaded, or Ollama version doesn't support it
@@ -509,7 +508,7 @@ def main():
                     "system": "Reply with only the word: pong",
                     "stream": False,
                     "keep_alive": -1,
-                    "options": {"temperature": 0.0, "num_predict": 5},
+                    "options": {"temperature": 0.0, "num_predict": 5, "num_ctx": cfg.llm_num_ctx},
                 }
             ).encode("utf-8")
             _req = _ur.Request(
@@ -704,7 +703,8 @@ def main():
     # Unload model from VRAM now that ingest is complete
     if not args.no_ping:  # only unload if we loaded it ourselves
         print("  Releasing model from VRAM...")
-        unload_model()
+        if unload_model():
+            print("  Model unloaded.")
 
 
 if __name__ == "__main__":

@@ -702,6 +702,11 @@ def main():
 
     print(f"\n[done] Done — {topic} / {wiki_page_path.name}")
 
+    # Unload model from VRAM now that ingest is complete
+    if not args.no_ping:  # only unload if we loaded it ourselves
+        print("  Releasing model from VRAM...")
+        unload_model()
+
 
 if __name__ == "__main__":
     main()

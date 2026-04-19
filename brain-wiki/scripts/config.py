@@ -11,21 +11,20 @@ Exposes:
     cfg.log_md          → Path   (BRAIN_VAULT_ROOT/log.md)
     cfg.raw_dir         → Path   (BRAIN_VAULT_ROOT/raw)
     cfg.wiki_dir        → Path   (BRAIN_VAULT_ROOT/wiki)
+    cfg.entity_dir      → Path   (BRAIN_VAULT_ROOT/wiki/_entities)
     cfg.llm_url         → str    (LOCAL_LLM_URL)
     cfg.llm_model       → str    (LOCAL_LLM_MODEL)
-    cfg.timeout_short   → int    seconds for classify/relevance calls
-    cfg.timeout_medium  → int    seconds for overview/merge/backpatch calls
-    cfg.timeout_long    → int    seconds for full page generation calls
+    cfg.llm_num_ctx     → int    (LOCAL_LLM_NUM_CTX)
+    cfg.timeout_short   → int    seconds for classify/relevance/entity-extract calls
+    cfg.timeout_long    → int    seconds for all other LLM calls
 
 .env keys:
     BRAIN_VAULT_ROOT=E:\brain                           # required
     LOCAL_LLM_URL=http://localhost:11434/api/generate   # optional
     LOCAL_LLM_MODEL=gemma4:26b                          # optional
+    LOCAL_LLM_NUM_CTX=262144                            # optional, context window tokens
     LLM_TIMEOUT_SHORT=300                               # optional, default 300s
-    LLM_TIMEOUT_MEDIUM=600                              # optional, default 600s
     LLM_TIMEOUT_LONG=900                                # optional, default 900s
-
-Increase timeouts if you are accessing Ollama over a network (e.g. Tailscale).
 """
 
 import sys
@@ -35,9 +34,9 @@ ENV_PATH = Path.home() / ".claude" / "skills" / ".env"
 
 _DEFAULT_LLM_URL = "http://localhost:11434/api/generate"
 _DEFAULT_LLM_MODEL = "gemma4:26b"
-_DEFAULT_TIMEOUT_SHORT = 300  # classify, relevance, image
-_DEFAULT_TIMEOUT_MEDIUM = 600  # overview, merge, backpatch, save-page
-_DEFAULT_TIMEOUT_LONG = 900  # full wiki page generation
+_DEFAULT_LLM_NUM_CTX = 262144
+_DEFAULT_TIMEOUT_SHORT = 300
+_DEFAULT_TIMEOUT_LONG = 900
 
 
 def _load_env(p: Path) -> dict:
@@ -72,23 +71,22 @@ class Config:
             )
             sys.exit(1)
 
+        def _int(key, default):
+            try:
+                return int(env.get(key, default))
+            except (ValueError, TypeError):
+                return default
+
         self.vault_root: Path = Path(root_str).expanduser().resolve()
         self.memory_md: Path = self.vault_root / "Memory.md"
         self.log_md: Path = self.vault_root / "log.md"
         self.raw_dir: Path = self.vault_root / "raw"
         self.wiki_dir: Path = self.vault_root / "wiki"
-        self.llm_url: str = env.get("LOCAL_LLM_URL", _DEFAULT_LLM_URL).strip()
         self.entity_dir: Path = self.vault_root / "wiki" / "_entities"
+        self.llm_url: str = env.get("LOCAL_LLM_URL", _DEFAULT_LLM_URL).strip()
         self.llm_model: str = env.get("LOCAL_LLM_MODEL", _DEFAULT_LLM_MODEL).strip()
-
-        def _int(key, default):
-            try:
-                return int(env.get(key, default))
-            except ValueError:
-                return default
-
+        self.llm_num_ctx: int = _int("LOCAL_LLM_NUM_CTX", _DEFAULT_LLM_NUM_CTX)
         self.timeout_short: int = _int("LLM_TIMEOUT_SHORT", _DEFAULT_TIMEOUT_SHORT)
-        self.timeout_medium: int = _int("LLM_TIMEOUT_MEDIUM", _DEFAULT_TIMEOUT_MEDIUM)
         self.timeout_long: int = _int("LLM_TIMEOUT_LONG", _DEFAULT_TIMEOUT_LONG)
 
     def ensure_dirs(self):

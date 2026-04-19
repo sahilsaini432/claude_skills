@@ -52,6 +52,7 @@ def call_local(
         "stream": True,  # stream tokens as they arrive
         "options": {
             "temperature": temperature,
+            "num_ctx": cfg.llm_num_ctx,
         },
     }
     data = json.dumps(payload).encode("utf-8")

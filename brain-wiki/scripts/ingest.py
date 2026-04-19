@@ -32,7 +32,6 @@ import json
 import re
 import shutil
 import sys
-import sys, io
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -128,7 +127,7 @@ def ping_model() -> bool:
             "system": "Reply with only the word: pong",
             "stream": False,
             "keep_alive": -1,
-            "options": {"temperature": 0.0, "num_predict": 5},
+            "options": {"temperature": 0.0, "num_predict": 5, "num_ctx": cfg.llm_num_ctx},
         }
     ).encode("utf-8")
     req = urllib.request.Request(

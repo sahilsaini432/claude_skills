@@ -276,6 +276,23 @@ def _create_entity_page(
     print(f"  [entity] Created entity page: _entities/{slug}.md")
 
 
+def _extract_key_section(text: str, heading: str, max_chars: int = 500) -> str:
+    """Extract a specific section from a markdown page, capped at max_chars."""
+    lines = text.splitlines()
+    in_section = False
+    result = []
+    for line in lines:
+        if line.strip() == f"## {heading}":
+            in_section = True
+            result.append(line)
+            continue
+        if in_section:
+            if line.startswith("## "):
+                break
+            result.append(line)
+    return "\n".join(result)[:max_chars]
+
+
 def _update_entity_page(
     page_path: Path,
     name: str,
@@ -288,15 +305,53 @@ def _update_entity_page(
     existing = page_path.read_text(encoding="utf-8")
     count = reg_entry.get("count", 2)
 
+    # Trim source content — extract only the Summary and Key Points sections
+    # from the wiki page if available, otherwise use raw content
+    # This avoids sending huge raw transcripts to the model
+    summary_section = _extract_key_section(source_content, "Summary", 800)
+    keypoints_section = _extract_key_section(source_content, "Key Points", 600)
+    if summary_section or keypoints_section:
+        trimmed_source = f"{summary_section}\n\n{keypoints_section}".strip()
+    else:
+        # Raw content — cap tightly
+        trimmed_source = source_content[:1000]
+
     prompt = (
         f"Entity: {name}\n"
         f"New source: {source_slug}\n"
         f"Updated reference count: {count}\n"
         f"Today: {today}\n\n"
         f"Existing entity page:\n{existing}\n\n"
-        f"New source content (first 3000 chars):\n{source_content[:3000]}"
+        f"New source excerpt:\n{trimmed_source}"
     )
-    updated = call_local(prompt, ENTITY_UPDATE_SYSTEM, timeout=cfg.timeout_long, label="entity update")
+
+    # Retry once on empty/short response
+    for attempt in range(2):
+        updated = call_local(
+            prompt,
+            ENTITY_UPDATE_SYSTEM,
+            timeout=cfg.timeout_long,
+            label=f"entity update (attempt {attempt+1})",
+        )
+        if len(updated.strip()) > 100:
+            break
+        print(
+            f"  [warn] Entity update returned short response on attempt {attempt+1}, retrying...",
+            file=sys.stderr,
+        )
+    else:
+        print(f"  [warn] Entity update failed after 2 attempts — keeping existing page", file=sys.stderr)
+        return
+
+    # Safety check — make sure Related Pages wasn't wiped
+    if "## Related Pages" in existing and "## Related Pages" not in updated:
+        # Preserve it by appending from original
+        import re
+
+        rel_match = re.search(r"(## Related Pages.*?)(?=\n## |\Z)", existing, re.DOTALL)
+        if rel_match:
+            updated = updated.rstrip() + "\n\n" + rel_match.group(1).strip() + "\n"
+
     page_path.write_text(updated, encoding="utf-8")
     print(f"  [entity] Updated entity page: _entities/{page_path.name}")
 

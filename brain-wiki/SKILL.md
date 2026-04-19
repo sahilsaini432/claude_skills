@@ -33,15 +33,14 @@ BRAIN_VAULT_ROOT=E:\brain
 # LLM connection — defaults shown, override for remote Ollama (e.g. Tailscale)
 LOCAL_LLM_URL=http://localhost:11434/api/generate
 LOCAL_LLM_MODEL=gemma4:26b
+LOCAL_LLM_NUM_CTX=256000     # context window — match your Ollama setting
 
-# Timeouts in seconds — increase if Ollama is on a remote/slow machine
-LLM_TIMEOUT_SHORT=300    # classify, relevance, image reads
-LLM_TIMEOUT_MEDIUM=600   # overview, merge, backpatch
-LLM_TIMEOUT_LONG=900     # full wiki page generation
+# Timeouts in seconds — defaults handle slow/remote Ollama
+LLM_TIMEOUT_SHORT=300        # classify, entity extract, relevance
+LLM_TIMEOUT_LONG=900         # all other LLM calls
 ```
 
 Only `BRAIN_VAULT_ROOT` is required. All other keys have sensible defaults.
-The timeouts are generous by default — lower them if Ollama is local and fast.
 
 ## Vault structure
 

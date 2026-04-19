@@ -1,47 +1,51 @@
 #!/usr/bin/env python3
 """
-lint.py — Health-check the brain-wiki.
+lint.py — Health-check the brain-wiki. Read-only by default.
 
 Usage:
-    python scripts/lint.py [--fix]
+    python3 scripts/lint.py [--fix]
 
-    --fix   Attempt to auto-fix orphan links and missing cross-references
+    --fix   Only performs safe, non-LLM structural fixes:
+            - Creates missing _overview.md stubs (no LLM, just a placeholder)
+            - Adds orphan pages to Memory.md index
+
+    Everything else is report-only. lint.py never touches ## Related Pages sections.
+    Cross-reference fixing is the ingest pipeline's job.
 
 Checks:
-    1. Orphan pages — wiki pages with no inbound links from Memory.md
-    2. Dead links — entries in Memory.md pointing to missing files
-    3. Missing cross-references — pages in the same topic not linked to each other
-    4. Stale _overview.md — topic has pages but no overview
-    5. Empty topics — topic folder exists but has no pages
-    6. LLM contradiction scan — asks gemma4:26b to flag contradictions across topic pages
+    1. Dead links       — Memory.md entries pointing to missing files
+    2. Orphan pages     — wiki/ files not indexed in Memory.md
+    3. Missing overviews — topic folders with pages but no _overview.md
+    4. Missing cross-refs — pages in same topic not linked to each other
+    5. Entity registry   — entities seen 2+ times with no page, or pages with no registry entry
+    6. Contradiction scan — LLM reads each topic's pages and flags inconsistencies (report only)
 """
 
+import json
 import re
 import sys
-import sys, io
-
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
-if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8")
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config import cfg
 from llm import call_local
-from wiki_index import append_log, backpatch_file, load_memory, get_topic_entries, slugify
+from wiki_index import append_log, load_memory, insert_entry, slugify
 
 CONTRADICTION_SYSTEM = """\
-You are reviewing a set of wiki pages from the same topic for a personal knowledge base.
+You are reviewing wiki pages from the same topic for a personal knowledge base.
 Identify:
 1. Factual contradictions between pages
 2. Claims in older pages superseded by newer ones
 3. Important concepts mentioned but lacking their own page
-4. Gaps that could be filled by searching for a new source
+4. Knowledge gaps worth filling with new sources
 
-Return a concise markdown report. Be specific — quote the conflicting claims and name the pages.
+Return a concise markdown report. Be specific — name the pages and quote conflicting claims.
 If everything looks consistent, say so briefly.
 """
+
+
+# ── Checks ────────────────────────────────────────────────────────────────────
 
 
 def check_dead_links(memory_text: str) -> list[str]:
@@ -49,54 +53,51 @@ def check_dead_links(memory_text: str) -> list[str]:
     for line in memory_text.splitlines():
         m = re.match(r"-\s+\[([^\]]+)\]\(([^)]+)\)", line)
         if m:
-            page_path = cfg.vault_root / m.group(2)
+            page_path = cfg.vault_root / m.group(2).replace("/", Path.cwd().drive and "\\" or "/")
+            # Normalise slashes for Windows
+            page_path = cfg.vault_root / Path(m.group(2))
             if not page_path.exists():
-                issues.append(f"Dead link: [{m.group(1)}]({m.group(2)}) — file not found")
+                issues.append(f"  Dead link: [{m.group(1)}]({m.group(2)})")
     return issues
 
 
 def check_orphans(memory_text: str) -> list[Path]:
-    """Find wiki pages that exist on disk but aren't in Memory.md."""
-    indexed_paths = set()
+    indexed = set()
     for line in memory_text.splitlines():
         m = re.match(r"-\s+\[([^\]]+)\]\(([^)]+)\)", line)
         if m:
-            indexed_paths.add((cfg.vault_root / m.group(2)).resolve())
+            indexed.add((cfg.vault_root / m.group(2)).resolve())
 
     orphans = []
     for wiki_file in cfg.wiki_dir.rglob("*.md"):
-        if wiki_file.name == "_overview.md":
+        if wiki_file.name.startswith("_"):
             continue
-        if wiki_file.resolve() not in indexed_paths:
+        if wiki_file.resolve() not in indexed:
             orphans.append(wiki_file)
     return orphans
 
 
-def check_missing_overviews(memory_text: str) -> list[str]:
-    """Find topic folders that have pages but no _overview.md."""
+def check_missing_overviews() -> list[Path]:
     issues = []
     if not cfg.wiki_dir.exists():
         return issues
     for topic_dir in cfg.wiki_dir.iterdir():
-        if not topic_dir.is_dir():
+        if not topic_dir.is_dir() or topic_dir.name.startswith("_"):
             continue
-        pages = [f for f in topic_dir.glob("*.md") if f.name != "_overview.md"]
-        overview = topic_dir / "_overview.md"
-        if pages and not overview.exists():
-            issues.append(f"Missing _overview.md in: wiki/{topic_dir.name}/")
+        pages = [f for f in topic_dir.glob("*.md") if not f.name.startswith("_")]
+        if pages and not (topic_dir / "_overview.md").exists():
+            issues.append(topic_dir)
     return issues
 
 
 def check_missing_crossrefs(memory_text: str) -> list[str]:
-    """Find pages in the same topic that don't reference each other."""
     issues = []
     if not cfg.wiki_dir.exists():
         return issues
-
     for topic_dir in cfg.wiki_dir.iterdir():
-        if not topic_dir.is_dir():
+        if not topic_dir.is_dir() or topic_dir.name.startswith("_"):
             continue
-        pages = [f for f in topic_dir.glob("*.md") if f.name != "_overview.md"]
+        pages = [f for f in topic_dir.glob("*.md") if not f.name.startswith("_")]
         if len(pages) < 2:
             continue
         for page in pages:
@@ -104,23 +105,48 @@ def check_missing_crossrefs(memory_text: str) -> list[str]:
             for other in pages:
                 if other == page:
                     continue
-                if other.stem not in content:
-                    issues.append(
-                        f"Missing cross-ref: {topic_dir.name}/{page.name} " f"doesn't link to {other.name}"
-                    )
+                other_slug = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", other.stem)
+                if other_slug not in content and other.stem not in content:
+                    issues.append(f"  {topic_dir.name}/{page.name} " f"does not link to {other.name}")
     return issues
 
 
-def scan_contradictions(memory_text: str) -> dict[str, str]:
-    """Run LLM contradiction scan per topic. Returns {topic: report}."""
+def check_entity_registry() -> list[str]:
+    issues = []
+    registry_path = cfg.vault_root / "entity_registry.json"
+    if not registry_path.exists():
+        return ["  No entity_registry.json yet — will be created on first ingest"]
+
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    entity_dir = cfg.wiki_dir / "_entities"
+
+    for slug, entry in registry.items():
+        count = entry.get("count", 0)
+        page = entity_dir / f"{slug}.md"
+        if count >= 2 and not page.exists():
+            issues.append(f"  Missing entity page: {slug}.md (seen {count}x)")
+        if count < 2 and page.exists():
+            issues.append(f"  Entity page exists but seen <2 times: {slug}.md")
+
+    # Check for entity pages not in registry
+    if entity_dir.exists():
+        for ep in entity_dir.glob("*.md"):
+            if ep.stem not in registry:
+                issues.append(f"  Entity page not in registry: {ep.name}")
+
+    return issues
+
+
+def scan_contradictions() -> dict[str, str]:
+    """Read-only LLM scan per topic. Returns {topic_name: report}."""
     reports = {}
     if not cfg.wiki_dir.exists():
         return reports
 
     for topic_dir in cfg.wiki_dir.iterdir():
-        if not topic_dir.is_dir():
+        if not topic_dir.is_dir() or topic_dir.name.startswith("_"):
             continue
-        pages = [f for f in topic_dir.glob("*.md") if f.name != "_overview.md"]
+        pages = [f for f in topic_dir.glob("*.md") if not f.name.startswith("_")]
         if len(pages) < 2:
             continue
 
@@ -128,170 +154,166 @@ def scan_contradictions(memory_text: str) -> dict[str, str]:
         print(f"  Scanning '{topic_name}' ({len(pages)} pages)...")
 
         pages_block = "\n\n".join(
-            f"--- {p.name} ---\n{p.read_text(encoding='utf-8', errors='replace')[:1500]}" for p in pages
+            f"--- {p.name} ---\n{p.read_text(encoding='utf-8', errors='replace')[:2000]}"
+            for p in sorted(pages)
         )
         prompt = f"Topic: {topic_name}\n\nPages:\n\n{pages_block}"
-        report = call_local(
-            prompt, CONTRADICTION_SYSTEM, timeout=cfg.timeout_long, label="contradiction scan"
+        reports[topic_name] = call_local(
+            prompt, CONTRADICTION_SYSTEM, timeout=cfg.timeout_long, label=f"scan {topic_name}"
         )
-        reports[topic_name] = report
-
     return reports
 
 
-def fix_missing_overviews(issues: list[str]):
-    from wiki_index import get_topic_entries
+# ── Fix helpers (non-LLM only) ─────────────────────────────────────────────────
 
-    OVERVIEW_INIT_SYSTEM = """\
-You are creating a topic overview page for a personal knowledge wiki.
-Write a concise _overview.md given the pages already in this topic.
-Return ONLY markdown — no fences, no preamble.
 
-# <Topic Name>
+def fix_missing_overviews(missing: list[Path]):
+    """Create a blank _overview.md stub — no LLM, just a placeholder."""
+    today = date.today().isoformat()
+    for topic_dir in missing:
+        topic_name = topic_dir.name.replace("-", " ").title()
+        stub = f"""\
+# {topic_name}
 
-## What this topic covers
-<2–3 sentences>
+> Overview stub — run ingest on a new source in this topic to populate.
 
 ## Pages
-<list pages with one-line descriptions>
-
-## Evolving Thesis
-<Running synthesis based on current pages.>
-
----
-*Managed by brain-wiki*
 """
-    for issue in issues:
-        folder_name = issue.split("wiki/")[1].rstrip("/")
-        topic_dir = cfg.wiki_dir / folder_name
-        pages = [f for f in topic_dir.glob("*.md") if f.name != "_overview.md"]
-        pages_block = "\n\n".join(
-            f"--- {p.name} ---\n{p.read_text(encoding='utf-8', errors='replace')[:1000]}" for p in pages
-        )
-        topic_name = folder_name.replace("-", " ").title()
-        prompt = f"Topic: {topic_name}\n\nExisting pages:\n\n{pages_block}"
-        content = call_local(prompt, OVERVIEW_INIT_SYSTEM, timeout=cfg.timeout_long, label="overview init")
-        overview_path = topic_dir / "_overview.md"
-        overview_path.write_text(content, encoding="utf-8")
-        print(f"  [ok] Created _overview.md for: {folder_name}")
+        pages = sorted(f for f in topic_dir.glob("*.md") if not f.name.startswith("_"))
+        for p in pages:
+            slug = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", p.stem)
+            stub += f"- [{slug}]({p.name})\n"
+
+        stub += f"\n---\n*Created by brain-wiki lint on {today}*\n"
+        overview = topic_dir / "_overview.md"
+        overview.write_text(stub, encoding="utf-8")
+        print(f"  [fix] Created stub: {overview.relative_to(cfg.vault_root)}")
+
+
+def fix_orphans(orphans: list[Path], memory_text: str) -> str:
+    """Add orphan pages to Memory.md under an Uncategorized section."""
+    today = date.today().isoformat()
+    for orphan in orphans:
+        try:
+            rel = orphan.relative_to(cfg.vault_root).as_posix()
+        except ValueError:
+            rel = orphan.as_posix()
+        slug = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", orphan.stem)
+        entry = f"- [{slug}]({rel}) — [orphan — review and re-ingest if needed]"
+        memory_text = insert_entry(memory_text, "Uncategorized", entry, today)
+        print(f"  [fix] Added to Memory.md (Uncategorized): {orphan.name}")
+    return memory_text
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 
 def main():
     parser = __import__("argparse").ArgumentParser(description="Lint the brain-wiki")
-    parser.add_argument("--fix", action="store_true", help="Auto-fix missing overviews and cross-references")
+    parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="Apply safe non-LLM fixes: create missing _overview.md stubs, add orphans to Memory.md",
+    )
+    parser.add_argument("--no-scan", action="store_true", help="Skip the LLM contradiction scan (faster)")
     args = parser.parse_args()
+
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
 
     cfg.ensure_dirs()
     memory_text = load_memory(cfg.memory_md)
-
-    print("\n[search] brain-wiki lint\n")
     all_clear = True
+    today = date.today().isoformat()
+
+    print("\nbrain-wiki lint\n" + "─" * 40)
 
     # 1. Dead links
     dead = check_dead_links(memory_text)
     if dead:
         all_clear = False
-        print(f"[error] Dead links ({len(dead)}):")
+        print(f"\n[error] Dead links ({len(dead)}) — entries in Memory.md pointing to missing files:")
         for d in dead:
-            print(f"   {d}")
+            print(d)
     else:
         print("[ok]  No dead links")
 
-    # 2. Orphans
+    # 2. Orphan pages
     orphans = check_orphans(memory_text)
     if orphans:
         all_clear = False
-        print(f"\n[error] Orphan pages ({len(orphans)}) — in wiki/ but not in Memory.md:")
+        print(f"\n[warn] Orphan pages ({len(orphans)}) — in wiki/ but not indexed in Memory.md:")
         for o in orphans:
-            print(f"   {o.relative_to(cfg.vault_root)}")
+            print(f"  {o.relative_to(cfg.vault_root)}")
+        if args.fix:
+            memory_text = fix_orphans(orphans, memory_text)
+            cfg.memory_md.write_text(memory_text, encoding="utf-8")
     else:
         print("[ok]  No orphan pages")
 
     # 3. Missing overviews
-    missing_overviews = check_missing_overviews(memory_text)
+    missing_overviews = check_missing_overviews()
     if missing_overviews:
         all_clear = False
-        print(f"\n[error] Missing _overview.md ({len(missing_overviews)}):")
-        for m in missing_overviews:
-            print(f"   {m}")
+        print(f"\n[warn] Missing _overview.md ({len(missing_overviews)}):")
+        for t in missing_overviews:
+            print(f"  wiki/{t.name}/")
         if args.fix:
-            print("  Auto-fixing...")
             fix_missing_overviews(missing_overviews)
+        else:
+            print("  Run with --fix to create stubs")
     else:
         print("[ok]  All topics have _overview.md")
 
-    # 4. Missing cross-references
+    # 4. Missing cross-references (report only)
     missing_xrefs = check_missing_crossrefs(memory_text)
     if missing_xrefs:
         all_clear = False
-        print(f"\n[warn]  Missing cross-references ({len(missing_xrefs)}):")
-        for x in missing_xrefs[:10]:  # cap at 10 to avoid noise
-            print(f"   {x}")
-        if len(missing_xrefs) > 10:
-            print(f"   ... and {len(missing_xrefs) - 10} more")
-        if args.fix:
-            print("  Auto-fixing cross-references...")
-            # back-patch missing links
-            for issue in missing_xrefs:
-                m = re.match(r"Missing cross-ref: (.+?) doesn't link to (.+)", issue)
-                if m:
-                    src = cfg.wiki_dir / m.group(1)
-                    tgt = cfg.wiki_dir / Path(m.group(1)).parent.name / m.group(2)
-                    if tgt.exists():
-                        rel = tgt.relative_to(src.parent)
-                        entry = f"- [{tgt.stem}]({rel}) — related page in same topic"
-                        backpatch_file(src, entry, call_local, timeout=cfg.timeout_long)
+        print(f"\n[info] Missing cross-references ({len(missing_xrefs)}) — for information only:")
+        for x in missing_xrefs[:15]:
+            print(x)
+        if len(missing_xrefs) > 15:
+            print(f"  ... and {len(missing_xrefs) - 15} more")
+        print("  Cross-references are added automatically by ingest — re-ingest sources to fix")
     else:
-        print("[ok]  All same-topic pages are cross-referenced")
+        print("[ok]  All same-topic pages cross-reference each other")
 
-    # 5. Entity registry health check
-    registry_path = cfg.vault_root / "entity_registry.json"
-    if registry_path.exists():
-        import json as _json
+    # 5. Entity registry
+    entity_issues = check_entity_registry()
+    if entity_issues:
+        all_clear = False
+        print(f"\n[warn] Entity registry issues ({len(entity_issues)}):")
+        for e in entity_issues:
+            print(e)
+    else:
+        print("[ok]  Entity registry consistent")
 
-        registry = _json.loads(registry_path.read_text(encoding="utf-8"))
-        entity_dir = cfg.wiki_dir / "_entities"
-        orphan_entities = []
-        missing_pages = []
-        for slug, entry in registry.items():
-            count = entry.get("count", 0)
-            page = entity_dir / f"{slug}.md"
-            if count >= 2 and not page.exists():
-                missing_pages.append(f"{entry['name']} (seen {count}x) — page missing")
-            if count < 2 and page.exists():
-                orphan_entities.append(f"{slug}.md — entity page exists but seen <2 times")
-        if missing_pages:
-            all_clear = False
-            print(f"\n[error] Entity pages missing ({len(missing_pages)}):")
-            for m in missing_pages:
-                print(f"   {m}")
+    # 6. Contradiction scan (LLM, read-only)
+    if not args.no_scan:
+        print("\n[scan] Running contradiction scan (read-only, local model)...")
+        reports = scan_contradictions()
+        if reports:
+            print("\nContradiction / gap report:")
+            for topic, report in reports.items():
+                print(f"\n  [{topic}]")
+                for line in report.splitlines():
+                    print(f"    {line}")
         else:
-            print("[ok]  Entity registry consistent")
-        if orphan_entities:
-            print(f"\n[warn] Entity pages with low reference count ({len(orphan_entities)}):")
-            for o in orphan_entities:
-                print(f"   {o}")
+            print("  No multi-page topics to scan yet.")
     else:
-        print("[ok]  No entity registry yet (will be created on first ingest)")
-
-    # 6. LLM contradiction scan
-    print("\n[llm] Running contradiction scan (local model)...")
-    contradiction_reports = scan_contradictions(memory_text)
-    if contradiction_reports:
-        print("\n[report] Contradiction / gap report:")
-        for topic, report in contradiction_reports.items():
-            print(f"\n  [{topic}]")
-            for line in report.splitlines():
-                print(f"    {line}")
-    else:
-        print("  No multi-page topics to scan yet.")
+        print("[skip] Contradiction scan skipped (--no-scan)")
 
     # Summary
-    print("\n" + "─" * 60)
+    print("\n" + "─" * 40)
     if all_clear:
         print("[done] Wiki looks healthy!")
     else:
-        print("[warn]  Issues found above. Run with --fix to auto-resolve some.")
+        print("[done] Issues found above.")
+        if not args.fix:
+            print("       Run with --fix to apply safe structural fixes.")
+        print("       Cross-reference and entity issues are fixed automatically by ingest.")
 
     append_log(cfg.log_md, "lint", "health check complete")
 

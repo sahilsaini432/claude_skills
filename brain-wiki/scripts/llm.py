@@ -1,30 +1,34 @@
 #!/usr/bin/env python3
 """
-llm.py — Local LLM caller via Ollama.
+llm.py — Local LLM caller via Ollama with streaming and timed logging.
 
 Usage (as a library):
     from llm import call_local
 
-call_local(prompt, system, timeout, temperature)  → str
+call_local(prompt, system, timeout, temperature, label)  -> str
 
-Reads connection settings from config (loaded from .env):
-    LOCAL_LLM_URL=http://localhost:11434/api/generate
-    LOCAL_LLM_MODEL=gemma4:26b
+    label    Short description shown in the timed log (e.g. "classify", "wiki page")
+             If omitted, no step label is printed.
+
+Streaming:
+    Tokens are printed to stderr as they arrive so you can watch generation in real time.
+    The complete response string is returned when done.
+
+Timed logging:
+    Prints elapsed time for each call:
+        [classify] ... done in 4.2s
+        [wiki page] ... done in 127.8s
 
 Temperature:
-    Default is 0.2 — low for factual, consistent wiki content.
-    Pass a higher value (e.g. 0.7) only for creative/generative tasks.
-
-All LLM work in brain-wiki runs locally. No API keys required.
-Queries are synthesized by Claude Code directly from printed wiki context.
+    Default 0.2 — factual and consistent. Pass higher for creative tasks.
 """
 
 import json
+import sys
+import time
 import urllib.error
 import urllib.request
 
-_DEFAULT_URL = "http://localhost:11434/api/generate"
-_DEFAULT_MODEL = "gemma4:26b"
 _DEFAULT_TEMPERATURE = 0.2
 
 
@@ -33,8 +37,9 @@ def call_local(
     system: str,
     timeout: int = 300,
     temperature: float = _DEFAULT_TEMPERATURE,
+    label: str = "",
 ) -> str:
-    """Call the local LLM via Ollama."""
+    """Call the local LLM via Ollama with streaming output and elapsed timing."""
     from config import cfg
 
     url = cfg.llm_url
@@ -44,7 +49,7 @@ def call_local(
         "model": model,
         "prompt": prompt,
         "system": system,
-        "stream": False,
+        "stream": True,  # stream tokens as they arrive
         "options": {
             "temperature": temperature,
         },
@@ -56,10 +61,45 @@ def call_local(
         headers={"Content-Type": "application/json"},
         method="POST",
     )
+
+    step = f"[{label}]" if label else "[llm]"
+    print(f"  {step} starting...", file=sys.stderr)
+    t_start = time.time()
+
     try:
+        full_response = []
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))["response"].strip()
+            # Print a header line then stream tokens inline
+            sys.stderr.write(f"  {step} ")
+            sys.stderr.flush()
+
+            for raw_line in resp:
+                line = raw_line.decode("utf-8").strip()
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                token = chunk.get("response", "")
+                if token:
+                    full_response.append(token)
+                    sys.stderr.write(token)
+                    sys.stderr.flush()
+
+                if chunk.get("done", False):
+                    break
+
+        elapsed = time.time() - t_start
+        sys.stderr.write(f"\n  {step} done in {elapsed:.1f}s\n")
+        sys.stderr.flush()
+
+        return "".join(full_response).strip()
+
     except urllib.error.URLError as e:
+        elapsed = time.time() - t_start
+        sys.stderr.write(f"\n  {step} failed after {elapsed:.1f}s\n")
         raise RuntimeError(
             f"Could not reach local LLM at {url}\n"
             f"Check LOCAL_LLM_URL in your .env\n"

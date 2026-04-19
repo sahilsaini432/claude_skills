@@ -374,7 +374,7 @@ def classify(content: str, memory_text: str, source_name: str) -> dict:
         f"Source content (first 3000 chars):\n{content[:3000]}\n\n"
         f"Current Memory.md:\n{memory_text}"
     )
-    raw = call_local(prompt, CLASSIFY_SYSTEM, timeout=cfg.timeout_short)
+    raw = call_local(prompt, CLASSIFY_SYSTEM, timeout=cfg.timeout_short, label="classify")
     raw = re.sub(r"```[a-z]*\n?", "", raw).strip()
     try:
         return json.loads(raw)
@@ -421,10 +421,10 @@ def write_wiki_page(
             + f"Related existing pages (path|description):\n{related_block}\n\n"
             + f"Source content:\n{content[:8000]}"
         )
-        return call_local(prompt, WIKI_PAGE_WITH_RELATED_SYSTEM, timeout=cfg.timeout_long)
+        return call_local(prompt, WIKI_PAGE_WITH_RELATED_SYSTEM, timeout=cfg.timeout_long, label="wiki page")
     else:
         prompt = base + f"Source content:\n{content[:8000]}"
-        return call_local(prompt, WIKI_PAGE_SYSTEM, timeout=cfg.timeout_long)
+        return call_local(prompt, WIKI_PAGE_SYSTEM, timeout=cfg.timeout_long, label="wiki page")
 
 
 def merge_wiki_page(
@@ -440,7 +440,7 @@ def merge_wiki_page(
         f"Today: {today}\n\n"
         f"New session content:\n{new_content[:8000]}"
     )
-    return call_local(prompt, MERGE_SYSTEM, timeout=cfg.timeout_long)
+    return call_local(prompt, MERGE_SYSTEM, timeout=cfg.timeout_long, label="merge page")
 
 
 # ── Overview ──────────────────────────────────────────────────────────────────
@@ -453,10 +453,10 @@ def update_overview(overview_path: Path, page_content: str, topic: str):
             f"Current _overview.md:\n\n{current}\n\n"
             f"Page just added/updated in topic '{topic}':\n\n{page_content[:3000]}"
         )
-        updated = call_local(prompt, OVERVIEW_SYSTEM, timeout=cfg.timeout_long)
+        updated = call_local(prompt, OVERVIEW_SYSTEM, timeout=cfg.timeout_long, label="overview update")
     else:
         prompt = f"Topic name: {topic}\n\nFirst page content:\n\n{page_content[:3000]}"
-        updated = call_local(prompt, OVERVIEW_INIT_SYSTEM, timeout=cfg.timeout_long)
+        updated = call_local(prompt, OVERVIEW_INIT_SYSTEM, timeout=cfg.timeout_long, label="overview init")
     overview_path.write_text(updated, encoding="utf-8")
     print("  [ok] _overview.md updated")
 

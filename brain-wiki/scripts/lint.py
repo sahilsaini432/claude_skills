@@ -131,7 +131,9 @@ def scan_contradictions(memory_text: str) -> dict[str, str]:
             f"--- {p.name} ---\n{p.read_text(encoding='utf-8', errors='replace')[:1500]}" for p in pages
         )
         prompt = f"Topic: {topic_name}\n\nPages:\n\n{pages_block}"
-        report = call_local(prompt, CONTRADICTION_SYSTEM, timeout=cfg.timeout_medium)
+        report = call_local(
+            prompt, CONTRADICTION_SYSTEM, timeout=cfg.timeout_long, label="contradiction scan"
+        )
         reports[topic_name] = report
 
     return reports
@@ -168,7 +170,7 @@ Return ONLY markdown — no fences, no preamble.
         )
         topic_name = folder_name.replace("-", " ").title()
         prompt = f"Topic: {topic_name}\n\nExisting pages:\n\n{pages_block}"
-        content = call_local(prompt, OVERVIEW_INIT_SYSTEM, timeout=cfg.timeout_medium)
+        content = call_local(prompt, OVERVIEW_INIT_SYSTEM, timeout=cfg.timeout_long, label="overview init")
         overview_path = topic_dir / "_overview.md"
         overview_path.write_text(content, encoding="utf-8")
         print(f"  [ok] Created _overview.md for: {folder_name}")
@@ -238,7 +240,7 @@ def main():
                     if tgt.exists():
                         rel = tgt.relative_to(src.parent)
                         entry = f"- [{tgt.stem}]({rel}) — related page in same topic"
-                        backpatch_file(src, entry, call_local, timeout=cfg.timeout_medium)
+                        backpatch_file(src, entry, call_local, timeout=cfg.timeout_long)
     else:
         print("[ok]  All same-topic pages are cross-referenced")
 

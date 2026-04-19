@@ -77,7 +77,7 @@ Return ONLY markdown, no fences:
 
 def find_relevant_topics(question: str, memory_text: str) -> list[str]:
     prompt = f"Question: {question}\n\nMemory.md:\n{memory_text}"
-    raw = call_local(prompt, RELEVANCE_SYSTEM, timeout=cfg.timeout_short)
+    raw = call_local(prompt, RELEVANCE_SYSTEM, timeout=cfg.timeout_short, label="find topics")
     raw = re.sub(r"```[a-z]*\n?", "", raw).strip()
     try:
         import json
@@ -138,7 +138,7 @@ def save_answer(question: str, answer_file: Path):
     topic_dir.mkdir(parents=True, exist_ok=True)
 
     prompt = f"Question: {question}\n\nAnswer:\n{answer_text}\n\nToday: {today}"
-    page_content = call_local(prompt, SAVE_PAGE_SYSTEM, timeout=cfg.timeout_medium)
+    page_content = call_local(prompt, SAVE_PAGE_SYSTEM, timeout=cfg.timeout_long, label="save answer")
 
     page_path = topic_dir / f"{slug}.md"
     page_path.write_text(page_content, encoding="utf-8")

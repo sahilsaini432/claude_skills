@@ -168,7 +168,7 @@ def slugify_entity(name: str) -> str:
 def extract_entities(content: str, source_name: str) -> list[dict]:
     """Ask local LLM to extract entities from source content."""
     prompt = f"Source: {source_name}\n\n" f"Content (first 4000 chars):\n{content[:4000]}"
-    raw = call_local(prompt, EXTRACT_SYSTEM, timeout=cfg.timeout_short)
+    raw = call_local(prompt, EXTRACT_SYSTEM, timeout=cfg.timeout_short, label="extract entities")
     raw = re.sub(r"```[a-z]*\n?", "", raw).strip()
     try:
         result = json.loads(raw)
@@ -271,7 +271,7 @@ def _create_entity_page(
         f"Today: {today}\n\n"
         f"Source excerpts:\n{source_excerpts}"
     )
-    content = call_local(prompt, ENTITY_BACKFILL_SYSTEM, timeout=cfg.timeout_long)
+    content = call_local(prompt, ENTITY_BACKFILL_SYSTEM, timeout=cfg.timeout_long, label="entity page")
     page_path.write_text(content, encoding="utf-8")
     print(f"  [entity] Created entity page: _entities/{slug}.md")
 
@@ -296,7 +296,7 @@ def _update_entity_page(
         f"Existing entity page:\n{existing}\n\n"
         f"New source content (first 3000 chars):\n{source_content[:3000]}"
     )
-    updated = call_local(prompt, ENTITY_UPDATE_SYSTEM, timeout=cfg.timeout_medium)
+    updated = call_local(prompt, ENTITY_UPDATE_SYSTEM, timeout=cfg.timeout_long, label="entity update")
     page_path.write_text(updated, encoding="utf-8")
     print(f"  [entity] Updated entity page: _entities/{page_path.name}")
 

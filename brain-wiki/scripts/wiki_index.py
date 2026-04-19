@@ -158,7 +158,7 @@ def backpatch_file(target_path: Path, new_entry_line: str, call_local_fn, timeou
     if slug_m and slug_m.group(1) in current:
         return False  # already linked
     prompt = f"Current file:\n\n{current}\n\n" f"New related page entry to add:\n{new_entry_line}"
-    updated = call_local_fn(prompt, BACKPATCH_SYSTEM, timeout=timeout)
+    updated = call_local_fn(prompt, BACKPATCH_SYSTEM, timeout=timeout, label="backpatch")
     target_path.write_text(updated, encoding="utf-8")
     print(f"  Back-patched: {target_path.name}")
     return True

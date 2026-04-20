@@ -365,6 +365,54 @@ def _clean_transcript(text: str) -> str:
     return text.strip()
 
 
+def _fetch_url(url: str) -> str:
+    """Fetch URL and return raw HTML string."""
+    import urllib.request as _ur
+
+    req = _ur.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with _ur.urlopen(req, timeout=30) as resp:
+        charset = resp.headers.get_content_charset() or "utf-8"
+        return resp.read().decode(charset, errors="replace")
+
+
+def _strip_html(html: str) -> str:
+    """Strip HTML tags; return clean readable text."""
+    from html.parser import HTMLParser
+
+    class _Stripper(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self._skip = False
+            self.parts: list[str] = []
+
+        def handle_starttag(self, tag, _attrs):
+            if tag in ("script", "style", "nav", "footer", "header"):
+                self._skip = True
+
+        def handle_endtag(self, tag):
+            if tag in ("script", "style", "nav", "footer", "header"):
+                self._skip = False
+
+        def handle_data(self, data):
+            if not self._skip:
+                self.parts.append(data)
+
+    s = _Stripper()
+    s.feed(html)
+    return re.sub(r"\s+", " ", " ".join(s.parts)).strip()
+
+
+def _url_to_filename(url: str, today: str) -> str:
+    """Derive a filesystem-safe archive filename from a URL."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    domain = parsed.netloc.replace("www.", "").replace(".", "-")
+    path_slug = re.sub(r"[^a-z0-9]+", "-", parsed.path.lower()).strip("-") or "index"
+    name = f"{domain}-{path_slug}-{today}"
+    return name[:120] + ".html"
+
+
 # ── Classify ──────────────────────────────────────────────────────────────────
 
 
@@ -512,18 +560,39 @@ def main():
         sys.exit(1)
 
     today = date.today().isoformat()
-    source_path = Path(args.source).resolve()
+    is_url = str(args.source or "").startswith(("http://", "https://"))
 
-    if not source_path.exists():
-        print(f"Error: source file not found: {source_path}", file=sys.stderr)
-        sys.exit(1)
+    if is_url:
+        url = args.source
+        print(f"\n[ingest] Fetching URL: {url}", file=sys.stderr)
+        _raw_html = _fetch_url(url)
+        _prefetched_content = _strip_html(_raw_html)
+        _prefetched_type = "Article"
+        _url_fname = _url_to_filename(url, today)
+        _url_raw_dest = cfg.raw_dir / "articles" / _url_fname
+        _url_raw_dest.parent.mkdir(parents=True, exist_ok=True)
+        _url_raw_dest.write_text(_raw_html, encoding="utf-8")
+        print(f"  [ok] Archived to raw/articles/{_url_fname}", file=sys.stderr)
+        source_path = _url_raw_dest
+        source_name = url
+    else:
+        source_path = Path(args.source).resolve()
+        if not source_path.exists():
+            print(f"Error: source file not found: {source_path}", file=sys.stderr)
+            sys.exit(1)
+        source_name = source_path.name
+        _prefetched_content = None
+        _prefetched_type = None
 
     # ── --claude-chat PHASE 1 ─────────────────────────────────────────────────
     # No Ollama at all. Read the source, print a structured synthesis prompt,
     # and exit with code 2 so Claude Code knows to proceed to phase 2.
     if args.claude_chat and not args.page_content_file:
-        print(f"\n[ingest --claude-chat] Phase 1 — reading source: {source_path.name}")
-        content, source_type = read_source(source_path)
+        print(f"\n[ingest --claude-chat] Phase 1 — reading source: {source_name}")
+        if _prefetched_content is not None:
+            content, source_type = _prefetched_content, _prefetched_type
+        else:
+            content, source_type = read_source(source_path)
         memory_text = load_memory(cfg.memory_md)
 
         # Heuristic slug from filename (Claude Code may override)
@@ -542,7 +611,7 @@ def main():
         print("\n" + "=" * 70)
         print("BRAIN-WIKI CLAUDE-CHAT PHASE 1")
         print("=" * 70)
-        print(f"SOURCE_NAME: {source_path.name}")
+        print(f"SOURCE_NAME: {source_name}")
         print(f"SOURCE_TYPE: {source_type}")
         print(f"SOURCE_PATH: {source_path}")
         print(f"TODAY: {today}")
@@ -630,11 +699,14 @@ def main():
                 print("Error: could not reach local model. Check Ollama is running.", file=sys.stderr)
                 sys.exit(1)
 
-    print(f"\n[ingest] Ingesting: {source_path.name}")
+    print(f"\n[ingest] Ingesting: {source_name}")
 
     # 1. Read source
     print("  Reading source...")
-    content, source_type = read_source(source_path)
+    if _prefetched_content is not None:
+        content, source_type = _prefetched_content, _prefetched_type
+    else:
+        content, source_type = read_source(source_path)
     memory_text = load_memory(cfg.memory_md)
 
     # ── CLASSIFY & GENERATE: branch on --claude-chat ──────────────────────────
@@ -680,7 +752,7 @@ def main():
         # Normal Ollama path
         # 2. Classify
         print("  Classifying topic...")
-        classification = classify(content, memory_text, source_path.name)
+        classification = classify(content, memory_text, source_name)
 
         topic = classification.get("topic", "Uncategorized")
         description = classification.get("description", source_path.stem)
@@ -712,13 +784,11 @@ def main():
         if is_merge:
             print("  Merging with existing page (local model)...")
             existing_content = existing_page.read_text(encoding="utf-8")
-            wiki_page_content = merge_wiki_page(existing_content, content, source_path.name, today)
+            wiki_page_content = merge_wiki_page(existing_content, content, source_name, today)
             wiki_page_path = existing_page
         else:
             print("  Generating wiki page (local model)...")
-            wiki_page_content = write_wiki_page(
-                content, source_type, source_path.name, existing_entries, today
-            )
+            wiki_page_content = write_wiki_page(content, source_type, source_name, existing_entries, today)
             wiki_page_path = topic_dir / f"{slug}-{today}.md"
 
     # 6. Preview
@@ -822,7 +892,7 @@ def main():
 
     # 11. Update log.md
     action = "merge" if is_merge else "ingest"
-    append_log(cfg.log_md, action, f"{source_path.name} → {wiki_page_path.name}")
+    append_log(cfg.log_md, action, f"{source_name} → {wiki_page_path.name}")
 
     # 12. Back-patch cross-references (only for new pages, not merges)
     if not is_merge and existing_entries:
@@ -878,7 +948,7 @@ def main():
             print("\n  No --entities-file provided — skipping entity tracking")
     else:
         print("\n  Extracting entities (local model)...")
-        entities = extract_entities(content, source_path.name)
+        entities = extract_entities(content, source_name)
 
     if entities:
         print(f"  Found {len(entities)} entities: {', '.join(e['name'] for e in entities)}")

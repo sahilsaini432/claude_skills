@@ -124,13 +124,14 @@ python3 scripts/query.py "question" --save answer.md
 
 ## Supported source types
 
-| Extension                   | Type                  | Handler                 |
-| --------------------------- | --------------------- | ----------------------- |
-| `.md` `.html`               | Article / Chat / Note | Text read               |
-| `.txt`                      | Note                  | Text read               |
-| `.pdf`                      | PDF                   | pymupdf text extraction |
-| `.jpg` `.png` `.webp`       | Image                 | gemma4:26b vision       |
-| `.srt` `.vtt` `.transcript` | Transcript            | Timestamp-stripped text |
+| Extension                   | Type                  | Handler                     |
+| --------------------------- | --------------------- | --------------------------- |
+| `http://` `https://` URL    | Article               | Fetch + HTML strip (stdlib) |
+| `.md` `.html`               | Article / Chat / Note | Text read                   |
+| `.txt`                      | Note                  | Text read                   |
+| `.pdf`                      | PDF                   | pymupdf text extraction     |
+| `.jpg` `.png` `.webp`       | Image                 | gemma4:26b vision           |
+| `.srt` `.vtt` `.transcript` | Transcript            | Timestamp-stripped text     |
 
 ## --claude-chat flag: Claude Code synthesizes the wiki page
 

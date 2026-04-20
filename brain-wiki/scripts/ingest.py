@@ -32,6 +32,7 @@ import json
 import re
 import shutil
 import sys
+import sys, io
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -97,6 +98,7 @@ def unload_model() -> bool:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             resp.read()
+        print(f"  Model unloaded from GPU memory.")
         return True
     except Exception as e:
         # Non-fatal — model may not have been loaded, or Ollama version doesn't support it
@@ -126,7 +128,7 @@ def ping_model() -> bool:
             "system": "Reply with only the word: pong",
             "stream": False,
             "keep_alive": -1,
-            "options": {"temperature": 0.0, "num_predict": 5, "num_ctx": cfg.llm_num_ctx},
+            "options": {"temperature": 0.0, "num_predict": 5},
         }
     ).encode("utf-8")
     req = urllib.request.Request(
@@ -372,7 +374,7 @@ def classify(content: str, memory_text: str, source_name: str) -> dict:
         f"Source content (first 3000 chars):\n{content[:3000]}\n\n"
         f"Current Memory.md:\n{memory_text}"
     )
-    raw = call_local(prompt, CLASSIFY_SYSTEM, timeout=cfg.timeout_short, label="classify")
+    raw = call_local(prompt, CLASSIFY_SYSTEM, timeout=cfg.timeout_short)
     raw = re.sub(r"```[a-z]*\n?", "", raw).strip()
     try:
         return json.loads(raw)
@@ -419,10 +421,10 @@ def write_wiki_page(
             + f"Related existing pages (path|description):\n{related_block}\n\n"
             + f"Source content:\n{content[:8000]}"
         )
-        return call_local(prompt, WIKI_PAGE_WITH_RELATED_SYSTEM, timeout=cfg.timeout_long, label="wiki page")
+        return call_local(prompt, WIKI_PAGE_WITH_RELATED_SYSTEM, timeout=cfg.timeout_long)
     else:
         prompt = base + f"Source content:\n{content[:8000]}"
-        return call_local(prompt, WIKI_PAGE_SYSTEM, timeout=cfg.timeout_long, label="wiki page")
+        return call_local(prompt, WIKI_PAGE_SYSTEM, timeout=cfg.timeout_long)
 
 
 def merge_wiki_page(
@@ -438,7 +440,7 @@ def merge_wiki_page(
         f"Today: {today}\n\n"
         f"New session content:\n{new_content[:8000]}"
     )
-    return call_local(prompt, MERGE_SYSTEM, timeout=cfg.timeout_long, label="merge page")
+    return call_local(prompt, MERGE_SYSTEM, timeout=cfg.timeout_long)
 
 
 # ── Overview ──────────────────────────────────────────────────────────────────
@@ -451,10 +453,10 @@ def update_overview(overview_path: Path, page_content: str, topic: str):
             f"Current _overview.md:\n\n{current}\n\n"
             f"Page just added/updated in topic '{topic}':\n\n{page_content[:3000]}"
         )
-        updated = call_local(prompt, OVERVIEW_SYSTEM, timeout=cfg.timeout_long, label="overview update")
+        updated = call_local(prompt, OVERVIEW_SYSTEM, timeout=cfg.timeout_long)
     else:
         prompt = f"Topic name: {topic}\n\nFirst page content:\n\n{page_content[:3000]}"
-        updated = call_local(prompt, OVERVIEW_INIT_SYSTEM, timeout=cfg.timeout_long, label="overview init")
+        updated = call_local(prompt, OVERVIEW_INIT_SYSTEM, timeout=cfg.timeout_long)
     overview_path.write_text(updated, encoding="utf-8")
     print("  [ok] _overview.md updated")
 
@@ -475,6 +477,28 @@ def main():
     parser.add_argument(
         "--no-unload", action="store_true", help="Ping to warm up but skip the unload step first"
     )
+
+    # --claude-chat mode: Claude Code synthesizes the wiki page instead of local LLM
+    parser.add_argument(
+        "--claude-chat",
+        action="store_true",
+        help=(
+            "Skip all Ollama calls. Phase 1: print a synthesis prompt and "
+            "classification JSON to stdout, then exit with code 2. "
+            "Phase 2: re-run with --page-content-file to write everything to disk."
+        ),
+    )
+    parser.add_argument(
+        "--page-content-file",
+        help="Path to a file containing the wiki page markdown (written by Claude Code in --claude-chat phase 2)",
+    )
+    parser.add_argument(
+        "--entities-file",
+        help="Path to a JSON file with extracted entities [{name,slug,description,type},...] (Claude Code phase 2)",
+    )
+    parser.add_argument("--topic", help="Topic name (required in --claude-chat phase 2)")
+    parser.add_argument("--slug", help="Page slug (required in --claude-chat phase 2)")
+    parser.add_argument("--description", help="One-line description (required in --claude-chat phase 2)")
     args = parser.parse_args()
 
     cfg.ensure_dirs()
@@ -494,8 +518,88 @@ def main():
         print(f"Error: source file not found: {source_path}", file=sys.stderr)
         sys.exit(1)
 
-    # Warm up model before doing anything else
-    if not args.no_ping:
+    # ── --claude-chat PHASE 1 ─────────────────────────────────────────────────
+    # No Ollama at all. Read the source, print a structured synthesis prompt,
+    # and exit with code 2 so Claude Code knows to proceed to phase 2.
+    if args.claude_chat and not args.page_content_file:
+        print(f"\n[ingest --claude-chat] Phase 1 — reading source: {source_path.name}")
+        content, source_type = read_source(source_path)
+        memory_text = load_memory(cfg.memory_md)
+
+        # Heuristic slug from filename (Claude Code may override)
+        auto_slug = re.sub(r"[^a-z0-9]+", "-", source_path.stem.lower())[:40]
+        auto_slug = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", auto_slug) or auto_slug
+
+        # Check if a page with this slug already exists (merge hint)
+        existing_page_hint = None
+        for topic_dir in cfg.wiki_dir.iterdir():
+            if topic_dir.is_dir():
+                hit = find_existing_page(topic_dir, auto_slug)
+                if hit:
+                    existing_page_hint = str(hit.relative_to(cfg.vault_root))
+                    break
+
+        print("\n" + "=" * 70)
+        print("BRAIN-WIKI CLAUDE-CHAT PHASE 1")
+        print("=" * 70)
+        print(f"SOURCE_NAME: {source_path.name}")
+        print(f"SOURCE_TYPE: {source_type}")
+        print(f"SOURCE_PATH: {source_path}")
+        print(f"TODAY: {today}")
+        print(f"AUTO_SLUG: {auto_slug}")
+        print(f"EXISTING_PAGE: {existing_page_hint or 'none'}")
+        print("MEMORY_MD_EXCERPT:")
+        print(memory_text[:3000])
+        print("SOURCE_CONTENT:")
+        print(content[:12000])
+        print("=" * 70)
+        print(
+            "\nINSTRUCTIONS FOR CLAUDE CODE:\n"
+            "1. Read SOURCE_CONTENT above.\n"
+            "2. Classify: pick or propose a topic from MEMORY_MD_EXCERPT, write a\n"
+            "   one-line description (<=12 words), and confirm or revise AUTO_SLUG.\n"
+            "3. If EXISTING_PAGE is set, merge new content into that page.\n"
+            "   Otherwise write a fresh wiki page using this schema:\n"
+            "     # Title\n"
+            "     **Source:** ... | **Date ingested:** ... | **Type:** ...\n"
+            "     ---\n"
+            "     ## Summary\n"
+            "     ## Key Points\n"
+            "     ## Concepts & Entities\n"
+            "     ## Quotes / Highlights\n"
+            "     ## Connections\n"
+            "     ## Related Pages  <- leave blank\n"
+            "     ---\n"
+            "     *Ingested by brain-wiki*\n"
+            "4. Extract 3-8 significant entities (tools, frameworks, people, concepts).\n"
+            "5. Write the wiki page markdown to a temp file.\n"
+            "6. Write the entities as JSON to a temp file:\n"
+            '   [{"name": ..., "slug": ..., "description": ..., "type": ...}, ...]\n'
+            "7. Re-run ingest.py with:\n"
+            "     python3 ingest.py SOURCE_PATH --claude-chat --yes \\\n"
+            "       --page-content-file <wiki_page_tmp> \\\n"
+            "       --entities-file <entities_tmp> \\\n"
+            "       --topic 'Topic Name' \\\n"
+            "       --slug 'your-slug' \\\n"
+            "       --description 'one-line description'\n"
+        )
+        print("=" * 70)
+        sys.exit(2)  # Sentinel: Claude Code must proceed to phase 2
+
+    # ── --claude-chat PHASE 2 ─────────────────────────────────────────────────
+    # Claude Code passes back the synthesized page via --page-content-file.
+    # We skip ALL Ollama calls and go straight to writing everything to disk.
+    if args.claude_chat and args.page_content_file:
+        # These args are required in phase 2
+        if not args.topic or not args.slug or not args.description:
+            print(
+                "Error: --claude-chat phase 2 requires --topic, --slug, and --description",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    # ── Normal Ollama warm-up (skipped entirely in --claude-chat) ─────────────
+    if not args.claude_chat and not args.no_ping:
         if args.no_unload:
             # Skip eviction — just ping to ensure model is loaded
             print("  Skipping unload — pinging model directly...")
@@ -508,7 +612,7 @@ def main():
                     "system": "Reply with only the word: pong",
                     "stream": False,
                     "keep_alive": -1,
-                    "options": {"temperature": 0.0, "num_predict": 5, "num_ctx": cfg.llm_num_ctx},
+                    "options": {"temperature": 0.0, "num_predict": 5},
                 }
             ).encode("utf-8")
             _req = _ur.Request(
@@ -531,47 +635,91 @@ def main():
     # 1. Read source
     print("  Reading source...")
     content, source_type = read_source(source_path)
-
-    # 2. Classify
     memory_text = load_memory(cfg.memory_md)
-    print("  Classifying topic...")
-    classification = classify(content, memory_text, source_path.name)
 
-    topic = classification.get("topic", "Uncategorized")
-    description = classification.get("description", source_path.stem)
-    is_new_topic = classification.get("is_new_topic", False)
-    slug = classification.get("slug", re.sub(r"[^a-z0-9]+", "-", source_path.stem.lower())[:40])
-    topic_folder = slugify(topic)
-    topic_dir = cfg.wiki_dir / topic_folder
+    # ── CLASSIFY & GENERATE: branch on --claude-chat ──────────────────────────
 
-    print(f"  → Topic:  {topic!r} ({'new' if is_new_topic else 'existing'})")
-    print(f"  → Slug:   {slug}")
+    if args.claude_chat:
+        # Phase 2: Claude Code has already synthesized the wiki page.
+        # Use the values passed via CLI flags — no LLM calls needed.
+        topic = args.topic
+        slug = args.slug
+        description = args.description
+        topic_folder = slugify(topic)
+        topic_dir = cfg.wiki_dir / topic_folder
 
-    # 3. Check for existing page with same slug
-    existing_page = find_existing_page(topic_dir, slug)
-    is_merge = existing_page is not None
+        print(f"  → Topic:  {topic!r} (claude-chat, no classify)")
+        print(f"  → Slug:   {slug}")
 
-    if is_merge:
-        print(f"  → Existing page found: {existing_page.name} — will merge")
+        # Read the wiki page content from the file Claude Code wrote
+        page_content_path = Path(args.page_content_file).resolve()
+        if not page_content_path.exists():
+            print(f"Error: --page-content-file not found: {page_content_path}", file=sys.stderr)
+            sys.exit(1)
+        wiki_page_content = page_content_path.read_text(encoding="utf-8").strip()
+
+        # Determine if this is a merge (existing page with same slug)
+        existing_page = find_existing_page(topic_dir, slug)
+        is_merge = existing_page is not None
+        if is_merge:
+            print(
+                f"  → Existing page found: {existing_page.name} — treating as merge (Claude Code pre-merged)"
+            )
+            wiki_page_path = existing_page
+        else:
+            print(f"  → New page: wiki/{topic_folder}/{slug}-{today}.md")
+            wiki_page_path = topic_dir / f"{slug}-{today}.md"
+
+        existing_entries = get_topic_entries(memory_text, topic)
+        if is_merge:
+            existing_entries = [
+                e for e in existing_entries if not Path(e["path"]).name.startswith(slug + "-")
+            ]
+
     else:
-        print(f"  → New page: wiki/{topic_folder}/{slug}-{today}.md")
+        # Normal Ollama path
+        # 2. Classify
+        print("  Classifying topic...")
+        classification = classify(content, memory_text, source_path.name)
 
-    # 4. Get existing topic entries for cross-referencing
-    existing_entries = get_topic_entries(memory_text, topic)
-    # Exclude the page we're merging into from cross-ref list
-    if is_merge:
-        existing_entries = [e for e in existing_entries if not Path(e["path"]).name.startswith(slug + "-")]
+        topic = classification.get("topic", "Uncategorized")
+        description = classification.get("description", source_path.stem)
+        is_new_topic = classification.get("is_new_topic", False)
+        slug = classification.get("slug", re.sub(r"[^a-z0-9]+", "-", source_path.stem.lower())[:40])
+        topic_folder = slugify(topic)
+        topic_dir = cfg.wiki_dir / topic_folder
 
-    # 5. Generate or merge wiki page
-    if is_merge:
-        print("  Merging with existing page (local model)...")
-        existing_content = existing_page.read_text(encoding="utf-8")
-        wiki_page_content = merge_wiki_page(existing_content, content, source_path.name, today)
-        wiki_page_path = existing_page
-    else:
-        print("  Generating wiki page (local model)...")
-        wiki_page_content = write_wiki_page(content, source_type, source_path.name, existing_entries, today)
-        wiki_page_path = topic_dir / f"{slug}-{today}.md"
+        print(f"  → Topic:  {topic!r} ({'new' if is_new_topic else 'existing'})")
+        print(f"  → Slug:   {slug}")
+
+        # 3. Check for existing page with same slug
+        existing_page = find_existing_page(topic_dir, slug)
+        is_merge = existing_page is not None
+
+        if is_merge:
+            print(f"  → Existing page found: {existing_page.name} — will merge")
+        else:
+            print(f"  → New page: wiki/{topic_folder}/{slug}-{today}.md")
+
+        # 4. Get existing topic entries for cross-referencing
+        existing_entries = get_topic_entries(memory_text, topic)
+        if is_merge:
+            existing_entries = [
+                e for e in existing_entries if not Path(e["path"]).name.startswith(slug + "-")
+            ]
+
+        # 5. Generate or merge wiki page
+        if is_merge:
+            print("  Merging with existing page (local model)...")
+            existing_content = existing_page.read_text(encoding="utf-8")
+            wiki_page_content = merge_wiki_page(existing_content, content, source_path.name, today)
+            wiki_page_path = existing_page
+        else:
+            print("  Generating wiki page (local model)...")
+            wiki_page_content = write_wiki_page(
+                content, source_type, source_path.name, existing_entries, today
+            )
+            wiki_page_path = topic_dir / f"{slug}-{today}.md"
 
     # 6. Preview
     print("\n" + "─" * 60)
@@ -626,7 +774,41 @@ def main():
         print("  [ok] Source already in raw/ — no copy needed")
 
     # 9. Update _overview.md
-    update_overview(topic_dir / "_overview.md", wiki_page_content, topic)
+    if args.claude_chat:
+        # No Ollama — do a minimal append-only update to the overview
+        overview_path = topic_dir / "_overview.md"
+        rel_page = posix_rel(wiki_page_path.relative_to(cfg.vault_root))
+        if not overview_path.exists():
+            overview_path.write_text(
+                f"# {topic}\n\n"
+                f"## What this topic covers\n"
+                f"<!-- stub — update manually or run lint --fix -->\n\n"
+                f"## Pages\n"
+                f"- [{slug}]({rel_page}) — {description}\n\n"
+                f"## Evolving Thesis\n"
+                f"<!-- stub -->\n\n"
+                f"---\n*Managed by brain-wiki*\n",
+                encoding="utf-8",
+            )
+            print("  [ok] _overview.md created (stub)")
+        else:
+            # Append the new page to the Pages section if not already listed
+            current = overview_path.read_text(encoding="utf-8")
+            entry = f"- [{slug}]({rel_page}) — {description}"
+            if slug not in current:
+                # Insert after ## Pages line
+                if "## Pages" in current:
+                    current = current.replace(
+                        "## Pages\n",
+                        f"## Pages\n{entry}\n",
+                        1,
+                    )
+                else:
+                    current += f"\n## Pages\n{entry}\n"
+                overview_path.write_text(current, encoding="utf-8")
+            print("  [ok] _overview.md updated (append-only, no LLM)")
+    else:
+        update_overview(topic_dir / "_overview.md", wiki_page_content, topic)
 
     # 10. Update Memory.md — use slug as display text (no date), keep dated filename
     rel_from_memory = posix_rel(wiki_page_path.relative_to(cfg.vault_root))
@@ -644,31 +826,60 @@ def main():
 
     # 12. Back-patch cross-references (only for new pages, not merges)
     if not is_merge and existing_entries:
-        print(f"\n  Cross-referencing {len(existing_entries)} existing page(s)...")
-        for ex in existing_entries:
-            ex_path = (cfg.vault_root / ex["path"]).resolve()
-            try:
-                rel = wiki_page_path.relative_to(ex_path.parent)
-            except ValueError:
-                rel = wiki_page_path
-            # Display text = slug only, no date
-            entry_for_old = f"- [{slug}]({posix_rel(rel)}) — {description}"
-            backpatch_file(ex_path, entry_for_old, call_local, timeout=cfg.timeout_long)
+        if args.claude_chat:
+            # In --claude-chat mode we skip Ollama-powered back-patching.
+            # Instead, print the pages that need cross-refs so Claude Code can
+            # manually append the link if desired.
+            print(f"\n  [claude-chat] Skipping Ollama back-patch.")
+            print(f"  The following existing pages should reference this new page:")
+            for ex in existing_entries:
+                print(f"    - {ex['path']} — {ex.get('description', '')}")
+            print(f"  New page should reference:")
+            for ex in existing_entries:
+                print(f"    - {ex['path']}")
+        else:
+            print(f"\n  Cross-referencing {len(existing_entries)} existing page(s)...")
+            for ex in existing_entries:
+                ex_path = (cfg.vault_root / ex["path"]).resolve()
+                try:
+                    rel = wiki_page_path.relative_to(ex_path.parent)
+                except ValueError:
+                    rel = wiki_page_path
+                # Display text = slug only, no date
+                entry_for_old = f"- [{slug}]({posix_rel(rel)}) — {description}"
+                backpatch_file(ex_path, entry_for_old, call_local, timeout=cfg.timeout_long)
 
-        for ex in existing_entries:
-            ex_path = (cfg.vault_root / ex["path"]).resolve()
-            try:
-                rel = ex_path.relative_to(wiki_page_path.parent)
-            except ValueError:
-                rel = ex_path
-            # Display text = slug only (strip date from stem)
-            ex_slug = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", Path(ex["path"]).stem)
-            entry_for_new = f"- [{ex_slug}]({posix_rel(rel)}) — {ex['description']}"
-            backpatch_file(wiki_page_path, entry_for_new, call_local, timeout=cfg.timeout_long)
+            for ex in existing_entries:
+                ex_path = (cfg.vault_root / ex["path"]).resolve()
+                try:
+                    rel = ex_path.relative_to(wiki_page_path.parent)
+                except ValueError:
+                    rel = ex_path
+                # Display text = slug only (strip date from stem)
+                ex_slug = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", Path(ex["path"]).stem)
+                entry_for_new = f"- [{ex_slug}]({posix_rel(rel)}) — {ex['description']}"
+                backpatch_file(wiki_page_path, entry_for_new, call_local, timeout=cfg.timeout_long)
 
     # 13. Entity extraction and page management
-    print("\n  Extracting entities (local model)...")
-    entities = extract_entities(content, source_path.name)
+    if args.claude_chat:
+        # Entities were extracted by Claude Code and passed via --entities-file
+        entities = []
+        if args.entities_file:
+            entities_path = Path(args.entities_file).resolve()
+            if entities_path.exists():
+                try:
+                    entities = json.loads(entities_path.read_text(encoding="utf-8"))
+                    print(f"\n  Loaded {len(entities)} entities from --entities-file")
+                except Exception as e:
+                    print(f"  [warn] Could not parse --entities-file: {e}", file=sys.stderr)
+            else:
+                print(f"  [warn] --entities-file not found: {entities_path}", file=sys.stderr)
+        else:
+            print("\n  No --entities-file provided — skipping entity tracking")
+    else:
+        print("\n  Extracting entities (local model)...")
+        entities = extract_entities(content, source_path.name)
+
     if entities:
         print(f"  Found {len(entities)} entities: {', '.join(e['name'] for e in entities)}")
         entity_pages = process_entities(

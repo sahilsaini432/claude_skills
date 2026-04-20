@@ -33,14 +33,15 @@ BRAIN_VAULT_ROOT=E:\brain
 # LLM connection — defaults shown, override for remote Ollama (e.g. Tailscale)
 LOCAL_LLM_URL=http://localhost:11434/api/generate
 LOCAL_LLM_MODEL=gemma4:26b
-LOCAL_LLM_NUM_CTX=256000     # context window — match your Ollama setting
 
-# Timeouts in seconds — defaults handle slow/remote Ollama
-LLM_TIMEOUT_SHORT=300        # classify, entity extract, relevance
-LLM_TIMEOUT_LONG=900         # all other LLM calls
+# Timeouts in seconds — increase if Ollama is on a remote/slow machine
+LLM_TIMEOUT_SHORT=300    # classify, relevance, image reads
+LLM_TIMEOUT_MEDIUM=600   # overview, merge, backpatch
+LLM_TIMEOUT_LONG=900     # full wiki page generation
 ```
 
 Only `BRAIN_VAULT_ROOT` is required. All other keys have sensible defaults.
+The timeouts are generous by default — lower them if Ollama is local and fast.
 
 ## Vault structure
 
@@ -69,11 +70,12 @@ E:\brain\
 
 See `references/operations.md` for full details.
 
-| Command            | What it does                                                      | Model                                             |
-| ------------------ | ----------------------------------------------------------------- | ------------------------------------------------- |
-| `ingest <file>`    | Read source → generate wiki page → update index → cross-reference | gemma4:26b (local)                                |
-| `query "question"` | Load relevant pages → print for Claude Code to answer             | gemma4:26b (topic finding) + Claude Code (answer) |
-| `lint`             | Orphans, dead links, missing overviews, contradiction scan        | gemma4:26b (local)                                |
+| Command                       | What it does                                                           | Model                                             |
+| ----------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
+| `ingest <file>`               | Read source → generate wiki page → update index → cross-reference      | gemma4:26b (local)                                |
+| `ingest <file> --claude-chat` | Same pipeline but Claude Code synthesizes the page — zero Ollama calls | Claude Code                                       |
+| `query "question"`            | Load relevant pages → print for Claude Code to answer                  | gemma4:26b (topic finding) + Claude Code (answer) |
+| `lint`                        | Orphans, dead links, missing overviews, contradiction scan             | gemma4:26b (local)                                |
 
 ## Entity system
 
@@ -92,8 +94,13 @@ visually connecting all topics that reference the same tool or concept.
 
 ## How to invoke in Claude Code
 
+> **IMPORTANT — always use `--claude-chat` for ingest when running from Claude Code.**
+> Claude Code must never invoke the normal (Ollama) ingest path. The `--claude-chat`
+> flag replaces all local LLM calls with Claude Code's own synthesis. This applies
+> to every ingest regardless of how the user phrases the request.
+
 ```
-/brain-wiki ingest /path/to/file.pdf
+/brain-wiki ingest /path/to/file.pdf        ← Claude Code automatically adds --claude-chat
 /brain-wiki query "what do I know about reinforcement learning?"
 /brain-wiki lint --fix
 ```
@@ -125,7 +132,71 @@ python3 scripts/query.py "question" --save answer.md
 | `.jpg` `.png` `.webp`       | Image                 | gemma4:26b vision       |
 | `.srt` `.vtt` `.transcript` | Transcript            | Timestamp-stripped text |
 
-## Chat session ingest
+## --claude-chat flag: Claude Code synthesizes the wiki page
+
+Use `--claude-chat` when you want **zero Ollama calls** — Claude Code reads the
+transcript and writes the wiki page itself. No warm-up, no GPU spin-up, no wait.
+
+This is a **two-phase protocol**:
+
+### Phase 1 — print synthesis prompt, exit 2
+
+```bash
+python3 ~/.claude/skills/brain-wiki/scripts/ingest.py <file> --claude-chat
+```
+
+The script:
+
+1. Reads the source file
+2. Prints a `BRAIN-WIKI CLAUDE-CHAT PHASE 1` block to stdout containing:
+   - `SOURCE_NAME`, `SOURCE_TYPE`, `SOURCE_PATH`, `TODAY`, `AUTO_SLUG`
+   - `EXISTING_PAGE` — path to any existing page with the same slug (merge hint)
+   - `MEMORY_MD_EXCERPT` — first 3000 chars of Memory.md for topic classification
+   - `SOURCE_CONTENT` — up to 12 000 chars of the source
+   - Step-by-step instructions for Claude Code
+3. Exits with **code 2** (sentinel meaning "Claude Code must complete phase 2")
+
+### Phase 2 — Claude Code synthesizes, then commits
+
+Claude Code must:
+
+1. **Classify** the source against `MEMORY_MD_EXCERPT` — pick a topic, confirm/revise the slug, write a ≤12-word description.
+2. **Write the wiki page** using the standard schema (same as normal ingest):
+   - `# Title`, `**Source:**`, `**Date ingested:**`, `**Type:**`
+   - `## Summary`, `## Key Points`, `## Concepts & Entities`
+   - `## Quotes / Highlights`, `## Connections`
+   - `## Related Pages` ← leave blank
+3. **Extract 3–8 entities** as JSON: `[{"name":…,"slug":…,"description":…,"type":…},…]`
+4. Write the wiki page to a temp file and entities to a temp file.
+5. Re-run ingest.py with:
+
+```bash
+python3 ~/.claude/skills/brain-wiki/scripts/ingest.py <SOURCE_PATH> \
+  --claude-chat --yes \
+  --page-content-file /tmp/wiki_page.md \
+  --entities-file /tmp/entities.json \
+  --topic "Topic Name" \
+  --slug "your-slug" \
+  --description "One-line description of this source"
+```
+
+Phase 2 does everything the normal path does **except**:
+
+- No Ollama classify/generate/merge calls
+- No Ollama overview synthesis (appends a plain entry instead)
+- No Ollama back-patching (prints the pages that need cross-refs for you to handle)
+- Entity page creation/update still runs (using the entities you provided)
+
+### When to use --claude-chat vs normal ingest
+
+| Situation                                 | Use                                             |
+| ----------------------------------------- | ----------------------------------------------- |
+| Ollama is running and GPU is available    | Normal `ingest`                                 |
+| Ollama is down / slow / on remote machine | `--claude-chat`                                 |
+| Ingesting the _current_ Claude Code chat  | `--claude-chat` (you're already in Claude Code) |
+| Batch ingesting many files overnight      | Normal `ingest`                                 |
+
+## Chat session ingest (--claude-chat mode)
 
 When triggered by "summarize this chat", "save this conversation", "save this session",
 or any similar phrase — **always follow these exact steps, no shortcuts**:

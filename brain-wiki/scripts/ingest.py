@@ -47,8 +47,9 @@ from llm import call_local
 from wiki_index import (
     append_log,
     backpatch_file,
-    get_topic_entries,
-    insert_entry,
+    get_topic_entries_local,
+    insert_topic_entry,
+    ensure_master_has_topic,
     load_memory,
     slugify,
     posix_rel,
@@ -773,7 +774,7 @@ def main():
             print(f"  → New page: wiki/{topic_folder}/{slug}-{today}.md")
             wiki_page_path = topic_dir / f"{slug}-{today}.md"
 
-        existing_entries = get_topic_entries(memory_text, topic)
+        existing_entries = get_topic_entries_local(topic_dir, cfg.vault_root)
         if is_merge:
             existing_entries = [
                 e for e in existing_entries if not Path(e["path"]).name.startswith(slug + "-")
@@ -805,7 +806,7 @@ def main():
             print(f"  → New page: wiki/{topic_folder}/{slug}-{today}.md")
 
         # 4. Get existing topic entries for cross-referencing
-        existing_entries = get_topic_entries(memory_text, topic)
+        existing_entries = get_topic_entries_local(topic_dir, cfg.vault_root)
         if is_merge:
             existing_entries = [
                 e for e in existing_entries if not Path(e["path"]).name.startswith(slug + "-")
@@ -915,15 +916,16 @@ def main():
     else:
         update_overview(topic_dir / "_overview.md", wiki_page_content, topic)
 
-    # 10. Update Memory.md — use slug as display text (no date), keep dated filename
-    rel_from_memory = posix_rel(wiki_page_path.relative_to(cfg.vault_root))
+    # 10. Update per-topic Memory.md and ensure master has a link to it
     if not is_merge:
-        memory_entry = f"- [{slug}]({rel_from_memory}) — {description}"
-        updated_memory = insert_entry(memory_text, topic, memory_entry, today)
-        cfg.memory_md.write_text(updated_memory, encoding="utf-8")
-        print("  [ok] Memory.md updated")
+        local_path = posix_rel(wiki_page_path.relative_to(topic_dir))
+        topic_entry = f"- [{slug}]({local_path}) — {description}"
+        insert_topic_entry(topic_dir, topic_entry, today)
+        topic_mem_rel = posix_rel((topic_dir / "Memory.md").relative_to(cfg.vault_root))
+        ensure_master_has_topic(cfg.memory_md, topic, topic_mem_rel, today)
+        print("  [ok] Topic Memory.md updated")
     else:
-        print("  [ok] Memory.md unchanged (merge into existing page)")
+        print("  [ok] Topic Memory.md unchanged (merge)")
 
     # 11. Update log.md
     action = "merge" if is_merge else "ingest"

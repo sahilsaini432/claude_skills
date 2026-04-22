@@ -172,7 +172,8 @@ def scan_contradictions() -> dict[str, str]:
     for topic_dir in cfg.wiki_dir.iterdir():
         if not topic_dir.is_dir() or topic_dir.name.startswith("_"):
             continue
-        pages = [f for f in topic_dir.glob("*.md") if not f.name.startswith("_")]
+        pages = [f for f in topic_dir.glob("*.md")
+                 if not f.name.startswith("_") and f.name != "Memory.md"]
         if len(pages) < 2:
             continue
 
@@ -216,7 +217,7 @@ def fix_missing_overviews(missing: list[Path]):
         print(f"  [fix] Created stub: {overview.relative_to(cfg.vault_root)}")
 
 
-def fix_orphans(orphans: list[Path], memory_text: str) -> str:
+def fix_orphans(orphans: list[Path]) -> str:
     """Add orphan pages to their topic's Memory.md."""
     today = date.today().isoformat()
     for orphan in orphans:
@@ -276,7 +277,7 @@ def main():
         for o in orphans:
             print(f"  {o.relative_to(cfg.vault_root)}")
         if args.fix:
-            memory_text = fix_orphans(orphans, memory_text)
+            memory_text = fix_orphans(orphans)
             # fix_orphans writes topic Memory.md files directly; memory_text is refreshed
     else:
         print("[ok]  No orphan pages")

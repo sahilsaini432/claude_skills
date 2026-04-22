@@ -186,6 +186,7 @@ def load_topic_memory(topic_dir: Path) -> str:
     topic_name = topic_dir.name.replace("-", " ").title()
     today = date.today().isoformat()
     text = TOPIC_MEMORY_TEMPLATE.format(topic=topic_name, date=today)
+    topic_dir.mkdir(parents=True, exist_ok=True)
     p.write_text(text, encoding="utf-8")
     return text
 
@@ -202,7 +203,10 @@ def get_topic_entries_local(topic_dir: Path, vault_root: Path) -> list[dict]:
         m = re.match(r"-\s+\[([^\]]+)\]\(([^)]+)\)\s+[—-]+\s+(.*)", line)
         if m:
             slug, local_path, desc = m.group(1), m.group(2).strip(), m.group(3).strip()
-            vault_rel = posix_rel((topic_dir / local_path).relative_to(vault_root))
+            try:
+                vault_rel = posix_rel((topic_dir / local_path).relative_to(vault_root))
+            except ValueError:
+                vault_rel = local_path
             entries.append({"slug": slug, "path": vault_rel, "description": desc})
     return entries
 
@@ -217,10 +221,13 @@ def insert_topic_entry(topic_dir: Path, entry_line: str, today: str):
     # Insert after the first "---" separator (after the header block)
     lines = text.splitlines()
     insert_at = len(lines)
+    seen_sep = 0
     for i, line in enumerate(lines):
         if line.strip() == "---":
-            insert_at = i + 1
-            break
+            seen_sep += 1
+            if seen_sep == 2:
+                insert_at = i  # insert before closing ---
+                break
     lines.insert(insert_at, entry_line)
     p.write_text(_update_footer("\n".join(lines), today), encoding="utf-8")
 

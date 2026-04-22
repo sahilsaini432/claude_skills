@@ -28,11 +28,26 @@ Notable people, tools, frameworks, ideas — one line each.
 How this source relates to other things in the wiki.
 
 ## Related Pages
-- [page-slug](relative/path.md) — one sentence on the connection
+- [_overview](_overview.md) — topic index      ← always first; added automatically
+- [entity-slug](../_entities/entity.md) — entity page
+- [other-slug](other-slug-YYYY-MM-DD.md) — optional additional context
 
 ---
 *Ingested by brain-wiki*
 ```
+
+**Link model** (forms distinct topic clusters in Obsidian graph view):
+
+| From | To | Direction |
+|------|----|-----------|
+| Source page | `_overview.md` (same topic) | spoke → hub |
+| Source page | `_entities/*.md` | leaf → shared concept |
+| `_overview.md` | source pages (same topic) | hub → spokes |
+| `_entities/*.md` | topic `_overview.md` | concept → cluster center |
+
+Entity pages link to topic overviews (not individual source pages) so they bridge
+clusters rather than individual leaves. This keeps the graph in distinct topic clusters
+connected at their centers instead of collapsing into one blob.
 
 ---
 

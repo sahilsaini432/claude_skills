@@ -87,10 +87,12 @@ After writing each wiki page, `ingest.py` automatically:
 3. **Creates entity pages on 2nd appearance** — `wiki/_entities/<slug>.md` is created
    the second time an entity appears, back-filled with content from both sources
 4. **Updates entity pages on subsequent appearances** — new facts merged in, count updated
-5. **Cross-links** — source wiki pages link to relevant entity pages and vice versa
+5. **Cross-links** — source wiki pages link to entity pages; entity pages link back to
+   topic `_overview.md` files (not individual source pages) to preserve distinct clusters
 
-Entity pages live in `wiki/_entities/` so they appear as hubs in Obsidian's graph view,
-visually connecting all topics that reference the same tool or concept.
+Entity pages live in `wiki/_entities/`. Each source page also gets a `[_overview](_overview.md)`
+parent link forming hub-and-spoke topology per topic. In Obsidian's graph this produces
+distinct topic clusters bridged at their centers (overview nodes) via entity pages.
 
 ## How to invoke in Claude Code
 

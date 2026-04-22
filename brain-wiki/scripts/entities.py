@@ -403,15 +403,34 @@ def link_source_to_entity_pages(
     entity_pages: list[Path],
     call_local_fn,
     timeout: int = 600,
+    topic_overview_path: Path | None = None,
 ):
-    """Add source page link to each entity page's Related Pages section."""
+    """Add topic overview link to each entity page's Related Pages section.
+
+    Links entity → topic _overview.md (not individual source page) so that
+    entity nodes bridge topic clusters rather than individual pages, producing
+    distinct clusters in Obsidian's graph view instead of one blob.
+
+    Falls back to linking entity → source page when topic_overview_path is
+    not provided (backwards-compatible).
+    """
     from wiki_index import backpatch_file
+
+    if topic_overview_path is not None and topic_overview_path.exists():
+        link_target = topic_overview_path
+        # Topic folder name as display text — also serves as dedup key.
+        # backpatch_file skips if this text already appears in the file.
+        topic_display = topic_overview_path.parent.name
+        link_desc = "topic overview"
+    else:
+        link_target = source_page_path
+        topic_display = source_slug
+        link_desc = source_description
 
     for ep in entity_pages:
         try:
-            rel = source_page_path.relative_to(ep.parent).as_posix()
+            rel = link_target.relative_to(ep.parent).as_posix()
         except ValueError:
-            # Different drives or paths — use relative from vault root
-            rel = (Path("..") / source_page_path.relative_to(cfg.wiki_dir.parent)).as_posix()
-        entry = f"- [{source_slug}]({rel}) — {source_description}"
+            rel = (Path("..") / link_target.relative_to(cfg.wiki_dir.parent)).as_posix()
+        entry = f"- [{topic_display}]({rel}) — {link_desc}"
         backpatch_file(ep, entry, call_local_fn, timeout=timeout)

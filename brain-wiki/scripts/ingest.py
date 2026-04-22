@@ -509,6 +509,27 @@ def update_overview(overview_path: Path, page_content: str, topic: str):
     print("  [ok] _overview.md updated")
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def _add_overview_link(page_path: Path):
+    """Prepend [_overview](_overview.md) to Related Pages if not already present.
+
+    Creates a parent-link from source page → topic overview, forming hub-and-spoke
+    topology per topic so Obsidian's graph shows distinct clusters.
+    """
+    content = page_path.read_text(encoding="utf-8")
+    if "_overview" in content or "## Related Pages" not in content:
+        return
+    new_content = content.replace(
+        "## Related Pages\n",
+        "## Related Pages\n- [_overview](_overview.md) — topic index\n",
+        1,
+    )
+    if new_content != content:
+        page_path.write_text(new_content, encoding="utf-8")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
@@ -646,7 +667,8 @@ def main():
             "     ## Concepts & Entities\n"
             "     ## Quotes / Highlights\n"
             "     ## Connections\n"
-            "     ## Related Pages  <- leave blank\n"
+            "     ## Related Pages\n"
+            "     - [_overview](_overview.md) — topic index\n"
             "     ---\n"
             "     *Ingested by brain-wiki*\n"
             "4. Extract 3-8 significant entities (tools, frameworks, people, concepts).\n"
@@ -827,6 +849,10 @@ def main():
     wiki_page_path.write_text(wiki_page_content, encoding="utf-8")
     print(f"\n  [ok] {'Merged' if is_merge else 'Written'}: {wiki_page_path.name}")
 
+    # Add parent link to _overview.md in Related Pages (hub-and-spoke topology)
+    if not is_merge:
+        _add_overview_link(wiki_page_path)
+
     # 8. Copy source to raw/ if not already there
     raw_type_map = {
         "Article": "articles",
@@ -984,6 +1010,7 @@ def main():
                 entity_pages,
                 call_local,
                 timeout=cfg.timeout_long,
+                topic_overview_path=topic_dir / "_overview.md",
             )
     else:
         print("  No significant entities found.")

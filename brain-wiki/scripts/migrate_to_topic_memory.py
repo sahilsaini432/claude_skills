@@ -68,7 +68,8 @@ def main():
             try:
                 local_path = page_path.relative_to(topic_dir).as_posix()
             except ValueError:
-                local_path = vault_rel  # fallback: keep vault-relative
+                local_path = vault_rel
+                print(f"  [warn] {slug}: path outside topic_dir, keeping vault-relative")
             entry_lines.append(f"- [{slug}]({local_path}) — {desc}")
 
         entries_block = "\n".join(entry_lines)

@@ -13,8 +13,19 @@ from pathlib import Path
 MEMORY_TEMPLATE = """\
 # Memory
 
-> Auto-maintained index of all wiki pages, grouped by topic.
+> Personal knowledge wiki index. Each topic has its own Memory.md with its pages.
 > Managed by brain-wiki — do not edit manually.
+
+---
+
+---
+*Last updated: {date}*
+"""
+
+TOPIC_MEMORY_TEMPLATE = """\
+# {topic}
+
+> Pages in this topic. Managed by brain-wiki — do not edit manually.
 
 ---
 
@@ -162,3 +173,70 @@ def backpatch_file(target_path: Path, new_entry_line: str, call_local_fn, timeou
     target_path.write_text(updated, encoding="utf-8")
     print(f"  Back-patched: {target_path.name}")
     return True
+
+
+# ── Per-topic Memory.md ───────────────────────────────────────────────────────
+
+
+def load_topic_memory(topic_dir: Path) -> str:
+    """Load per-topic Memory.md, creating a stub if missing."""
+    p = topic_dir / "Memory.md"
+    if p.exists():
+        return p.read_text(encoding="utf-8")
+    topic_name = topic_dir.name.replace("-", " ").title()
+    today = date.today().isoformat()
+    text = TOPIC_MEMORY_TEMPLATE.format(topic=topic_name, date=today)
+    p.write_text(text, encoding="utf-8")
+    return text
+
+
+def get_topic_entries_local(topic_dir: Path, vault_root: Path) -> list[dict]:
+    """Get page entries from a topic's Memory.md. Returns vault-relative paths.
+
+    Same return format as get_topic_entries() so callers need no changes beyond
+    swapping the function.
+    """
+    text = load_topic_memory(topic_dir)
+    entries = []
+    for line in text.splitlines():
+        m = re.match(r"-\s+\[([^\]]+)\]\(([^)]+)\)\s+[—-]+\s+(.*)", line)
+        if m:
+            slug, local_path, desc = m.group(1), m.group(2).strip(), m.group(3).strip()
+            vault_rel = posix_rel((topic_dir / local_path).relative_to(vault_root))
+            entries.append({"slug": slug, "path": vault_rel, "description": desc})
+    return entries
+
+
+def insert_topic_entry(topic_dir: Path, entry_line: str, today: str):
+    """Insert a page entry into the topic's Memory.md (idempotent by slug)."""
+    p = topic_dir / "Memory.md"
+    text = load_topic_memory(topic_dir)
+    slug_m = re.search(r"\[([^\]]+)\]", entry_line)
+    if slug_m and slug_m.group(1) in text:
+        return  # already indexed
+    # Insert after the first "---" separator (after the header block)
+    lines = text.splitlines()
+    insert_at = len(lines)
+    for i, line in enumerate(lines):
+        if line.strip() == "---":
+            insert_at = i + 1
+            break
+    lines.insert(insert_at, entry_line)
+    p.write_text(_update_footer("\n".join(lines), today), encoding="utf-8")
+
+
+def ensure_master_has_topic(master_path: Path, topic: str, topic_memory_rel: str, today: str):
+    """Add a topic link to master Memory.md if not already present (idempotent)."""
+    text = load_memory(master_path)
+    if f"[{topic}]" in text:
+        return  # already listed
+    entry = f"- [{topic}]({topic_memory_rel})"
+    # Insert before the final "---" separator
+    lines = text.splitlines()
+    insert_at = len(lines)
+    for i in range(len(lines) - 1, -1, -1):
+        if lines[i].strip() == "---":
+            insert_at = i
+            break
+    lines.insert(insert_at, entry)
+    master_path.write_text(_update_footer("\n".join(lines), today), encoding="utf-8")

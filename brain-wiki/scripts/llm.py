@@ -25,19 +25,20 @@ Temperature:
     Default 0.2 — factual and consistent. Pass higher for creative tasks.
 """
 
+import http.client
 import json
 import sys
 import threading
 import time
 import urllib.error
-import urllib.request
+import urllib.parse
 
 _DEFAULT_TEMPERATURE = 0.2
 
-# Separate connect timeout from generation timeout.
-# Short connect timeout catches "Ollama not running" fast.
-# Model loading can be slow — the thread join enforces the real wall-clock limit.
-_CONNECT_TIMEOUT = 60
+# TCP connect timeout only — fails fast if Ollama isn't listening.
+# After connection, socket timeout is extended to the full call timeout so prefill
+# (context processing before first token) and slow generation don't trigger a read timeout.
+_TCP_CONNECT_TIMEOUT = 10
 
 
 def call_local(
@@ -64,12 +65,6 @@ def call_local(
         },
     }
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
 
     step = f"[{label}]" if label else "[llm]"
     print(f"  {step} starting...", file=sys.stderr)
@@ -81,31 +76,47 @@ def call_local(
         try:
             full_response = []
             t_first_token: float | None = None
-            with urllib.request.urlopen(req, timeout=_CONNECT_TIMEOUT) as resp:
-                sys.stderr.write(f"  {step} ")
-                sys.stderr.flush()
 
-                for raw_line in resp:
-                    line = raw_line.decode("utf-8").strip()
-                    if not line:
-                        continue
-                    try:
-                        chunk = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
+            parsed = urllib.parse.urlparse(url)
+            ConnClass = (
+                http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+            )
+            conn = ConnClass(parsed.netloc, timeout=_TCP_CONNECT_TIMEOUT)
+            path = parsed.path or "/"
+            if parsed.query:
+                path += "?" + parsed.query
+            conn.request("POST", path, body=data, headers={"Content-Type": "application/json"})
+            # TCP connected — now extend socket timeout for prefill + streaming reads
+            if conn.sock:
+                conn.sock.settimeout(timeout)
+            http_resp = conn.getresponse()
 
-                    token = chunk.get("response", "")
-                    if token:
-                        if t_first_token is None:
-                            t_first_token = time.time() - t_start
-                            sys.stderr.write(f"[+{t_first_token:.0f}s] ")
-                            sys.stderr.flush()
-                        full_response.append(token)
-                        sys.stderr.write(token)
+            sys.stderr.write(f"  {step} ")
+            sys.stderr.flush()
+
+            for raw_line in http_resp:
+                line = raw_line.decode("utf-8").strip()
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                token = chunk.get("response", "")
+                if token:
+                    if t_first_token is None:
+                        t_first_token = time.time() - t_start
+                        sys.stderr.write(f"[+{t_first_token:.0f}s] ")
                         sys.stderr.flush()
+                    full_response.append(token)
+                    sys.stderr.write(token)
+                    sys.stderr.flush()
 
-                    if chunk.get("done", False):
-                        break
+                if chunk.get("done", False):
+                    break
+
+            conn.close()
 
             result["text"] = "".join(full_response).strip()
         except Exception as e:
@@ -120,15 +131,14 @@ def call_local(
         sys.stderr.write(f"\n  {step} TIMED OUT after {elapsed:.1f}s\n")
         sys.stderr.flush()
         raise RuntimeError(
-            f"LLM call timed out after {timeout}s ({step}) — "
-            f"model may be stuck or overloaded"
+            f"LLM call timed out after {timeout}s ({step}) — " f"model may be stuck or overloaded"
         )
 
     if result["error"] is not None:
         e = result["error"]
         sys.stderr.write(f"\n  {step} failed after {elapsed:.1f}s\n")
         sys.stderr.flush()
-        if isinstance(e, urllib.error.URLError):
+        if isinstance(e, (urllib.error.URLError, ConnectionRefusedError, OSError, http.client.HTTPException)):
             raise RuntimeError(
                 f"Could not reach local LLM at {url}\n"
                 f"Check LOCAL_LLM_URL in your .env\n"

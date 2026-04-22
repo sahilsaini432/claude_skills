@@ -526,28 +526,37 @@ def main():
         "--no-unload", action="store_true", help="Ping to warm up but skip the unload step first"
     )
 
-    # --claude-chat mode: Claude Code synthesizes the wiki page instead of local LLM
+    # Default mode is claude-chat (Claude Code synthesizes the page, zero Ollama calls).
+    # Pass --ollama to use the local LLM pipeline instead (overnight batch, no Claude Code).
+    parser.add_argument(
+        "--ollama",
+        action="store_true",
+        help=(
+            "Use the local Ollama pipeline for synthesis, merging, entities, and back-patching. "
+            "Default mode is claude-chat (zero Ollama calls — Claude Code writes the page)."
+        ),
+    )
+    # Back-compat: --claude-chat is now the default. Accept the flag but it's a no-op.
     parser.add_argument(
         "--claude-chat",
         action="store_true",
-        help=(
-            "Skip all Ollama calls. Phase 1: print a synthesis prompt and "
-            "classification JSON to stdout, then exit with code 2. "
-            "Phase 2: re-run with --page-content-file to write everything to disk."
-        ),
+        help="[deprecated — now the default] Kept for backward compatibility.",
     )
     parser.add_argument(
         "--page-content-file",
-        help="Path to a file containing the wiki page markdown (written by Claude Code in --claude-chat phase 2)",
+        help="Path to a file containing the wiki page markdown (written by Claude Code in phase 2)",
     )
     parser.add_argument(
         "--entities-file",
-        help="Path to a JSON file with extracted entities [{name,slug,description,type},...] (Claude Code phase 2)",
+        help="Path to a JSON file with extracted entities [{name,slug,description,type},...] (phase 2)",
     )
-    parser.add_argument("--topic", help="Topic name (required in --claude-chat phase 2)")
-    parser.add_argument("--slug", help="Page slug (required in --claude-chat phase 2)")
-    parser.add_argument("--description", help="One-line description (required in --claude-chat phase 2)")
+    parser.add_argument("--topic", help="Topic name (required in claude-chat phase 2)")
+    parser.add_argument("--slug", help="Page slug (required in claude-chat phase 2)")
+    parser.add_argument("--description", help="One-line description (required in claude-chat phase 2)")
     args = parser.parse_args()
+
+    # claude-chat is the default; --ollama opts out.
+    use_claude_chat = not args.ollama
 
     cfg.ensure_dirs()
 
@@ -587,7 +596,7 @@ def main():
     # ── --claude-chat PHASE 1 ─────────────────────────────────────────────────
     # No Ollama at all. Read the source, print a structured synthesis prompt,
     # and exit with code 2 so Claude Code knows to proceed to phase 2.
-    if args.claude_chat and not args.page_content_file:
+    if use_claude_chat and not args.page_content_file:
         print(f"\n[ingest --claude-chat] Phase 1 — reading source: {source_name}")
         if _prefetched_content is not None:
             content, source_type = _prefetched_content, _prefetched_type
@@ -658,7 +667,7 @@ def main():
     # ── --claude-chat PHASE 2 ─────────────────────────────────────────────────
     # Claude Code passes back the synthesized page via --page-content-file.
     # We skip ALL Ollama calls and go straight to writing everything to disk.
-    if args.claude_chat and args.page_content_file:
+    if use_claude_chat and args.page_content_file:
         # These args are required in phase 2
         if not args.topic or not args.slug or not args.description:
             print(
@@ -668,7 +677,7 @@ def main():
             sys.exit(1)
 
     # ── Normal Ollama warm-up (skipped entirely in --claude-chat) ─────────────
-    if not args.claude_chat and not args.no_ping:
+    if not use_claude_chat and not args.no_ping:
         if args.no_unload:
             # Skip eviction — just ping to ensure model is loaded
             print("  Skipping unload — pinging model directly...")
@@ -711,7 +720,7 @@ def main():
 
     # ── CLASSIFY & GENERATE: branch on --claude-chat ──────────────────────────
 
-    if args.claude_chat:
+    if use_claude_chat:
         # Phase 2: Claude Code has already synthesized the wiki page.
         # Use the values passed via CLI flags — no LLM calls needed.
         topic = args.topic
@@ -844,7 +853,7 @@ def main():
         print("  [ok] Source already in raw/ — no copy needed")
 
     # 9. Update _overview.md
-    if args.claude_chat:
+    if use_claude_chat:
         # No Ollama — do a minimal append-only update to the overview
         overview_path = topic_dir / "_overview.md"
         rel_page = posix_rel(wiki_page_path.relative_to(cfg.vault_root))
@@ -896,7 +905,7 @@ def main():
 
     # 12. Back-patch cross-references (only for new pages, not merges)
     if not is_merge and existing_entries:
-        if args.claude_chat:
+        if use_claude_chat:
             # In --claude-chat mode we skip Ollama-powered back-patching.
             # Instead, print the pages that need cross-refs so Claude Code can
             # manually append the link if desired.
@@ -931,7 +940,7 @@ def main():
                 backpatch_file(wiki_page_path, entry_for_new, call_local, timeout=cfg.timeout_long)
 
     # 13. Entity extraction and page management
-    if args.claude_chat:
+    if use_claude_chat:
         # Entities were extracted by Claude Code and passed via --entities-file
         entities = []
         if args.entities_file:

@@ -30,7 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from config import cfg
 from llm import call_local
-from wiki_index import append_log, load_memory, insert_entry, slugify
+from wiki_index import append_log, load_memory, slugify, posix_rel, insert_topic_entry, ensure_master_has_topic
 
 CONTRADICTION_SYSTEM = """\
 You are reviewing wiki pages from the same topic for a personal knowledge base.
@@ -49,28 +49,52 @@ If everything looks consistent, say so briefly.
 
 
 def check_dead_links(memory_text: str) -> list[str]:
+    """Check master Memory.md topic links and each per-topic Memory.md page links."""
     issues = []
     for line in memory_text.splitlines():
         m = re.match(r"-\s+\[([^\]]+)\]\(([^)]+)\)", line)
-        if m:
-            page_path = cfg.vault_root / m.group(2).replace("/", Path.cwd().drive and "\\" or "/")
-            # Normalise slashes for Windows
-            page_path = cfg.vault_root / Path(m.group(2))
-            if not page_path.exists():
-                issues.append(f"  Dead link: [{m.group(1)}]({m.group(2)})")
+        if not m:
+            continue
+        topic_mem_path = cfg.vault_root / Path(m.group(2))
+        if not topic_mem_path.exists():
+            issues.append(f"  Dead topic link: [{m.group(1)}]({m.group(2)})")
+            continue
+        topic_dir = topic_mem_path.parent
+        topic_mem_text = topic_mem_path.read_text(encoding="utf-8")
+        for tline in topic_mem_text.splitlines():
+            tm = re.match(r"-\s+\[([^\]]+)\]\(([^)]+)\)", tline)
+            if tm:
+                page_path = topic_dir / tm.group(2)
+                if not page_path.exists():
+                    issues.append(
+                        f"  Dead link in {topic_dir.name}/Memory.md: "
+                        f"[{tm.group(1)}]({tm.group(2)})"
+                    )
     return issues
 
 
 def check_orphans(memory_text: str) -> list[Path]:
+    """Find wiki pages not indexed in any per-topic Memory.md."""
     indexed = set()
+
     for line in memory_text.splitlines():
         m = re.match(r"-\s+\[([^\]]+)\]\(([^)]+)\)", line)
-        if m:
-            indexed.add((cfg.vault_root / m.group(2)).resolve())
+        if not m:
+            continue
+        topic_mem_path = cfg.vault_root / Path(m.group(2))
+        if not topic_mem_path.exists():
+            continue
+        indexed.add(topic_mem_path.resolve())  # Memory.md itself is tracked
+        topic_dir = topic_mem_path.parent
+        topic_mem_text = topic_mem_path.read_text(encoding="utf-8")
+        for tline in topic_mem_text.splitlines():
+            tm = re.match(r"-\s+\[([^\]]+)\]\(([^)]+)\)", tline)
+            if tm:
+                indexed.add((topic_dir / tm.group(2)).resolve())
 
     orphans = []
     for wiki_file in cfg.wiki_dir.rglob("*.md"):
-        if wiki_file.name.startswith("_"):
+        if wiki_file.name.startswith("_") or wiki_file.name == "Memory.md":
             continue
         if wiki_file.resolve() not in indexed:
             orphans.append(wiki_file)
@@ -84,7 +108,8 @@ def check_missing_overviews() -> list[Path]:
     for topic_dir in cfg.wiki_dir.iterdir():
         if not topic_dir.is_dir() or topic_dir.name.startswith("_"):
             continue
-        pages = [f for f in topic_dir.glob("*.md") if not f.name.startswith("_")]
+        pages = [f for f in topic_dir.glob("*.md")
+                 if not f.name.startswith("_") and f.name != "Memory.md"]
         if pages and not (topic_dir / "_overview.md").exists():
             issues.append(topic_dir)
     return issues
@@ -97,7 +122,8 @@ def check_missing_crossrefs(memory_text: str) -> list[str]:
     for topic_dir in cfg.wiki_dir.iterdir():
         if not topic_dir.is_dir() or topic_dir.name.startswith("_"):
             continue
-        pages = [f for f in topic_dir.glob("*.md") if not f.name.startswith("_")]
+        pages = [f for f in topic_dir.glob("*.md")
+                 if not f.name.startswith("_") and f.name != "Memory.md"]
         if len(pages) < 2:
             continue
         for page in pages:
@@ -191,18 +217,20 @@ def fix_missing_overviews(missing: list[Path]):
 
 
 def fix_orphans(orphans: list[Path], memory_text: str) -> str:
-    """Add orphan pages to Memory.md under an Uncategorized section."""
+    """Add orphan pages to their topic's Memory.md."""
     today = date.today().isoformat()
     for orphan in orphans:
-        try:
-            rel = orphan.relative_to(cfg.vault_root).as_posix()
-        except ValueError:
-            rel = orphan.as_posix()
+        topic_dir = orphan.parent
+        if topic_dir == cfg.wiki_dir:
+            continue  # top-level file — skip
         slug = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", orphan.stem)
-        entry = f"- [{slug}]({rel}) — [orphan — review and re-ingest if needed]"
-        memory_text = insert_entry(memory_text, "Uncategorized", entry, today)
-        print(f"  [fix] Added to Memory.md (Uncategorized): {orphan.name}")
-    return memory_text
+        entry = f"- [{slug}]({orphan.name}) — [orphan — review and re-ingest if needed]"
+        insert_topic_entry(topic_dir, entry, today)
+        topic_mem_rel = posix_rel((topic_dir / "Memory.md").relative_to(cfg.vault_root))
+        topic_name = topic_dir.name.replace("-", " ").title()
+        ensure_master_has_topic(cfg.memory_md, topic_name, topic_mem_rel, today)
+        print(f"  [fix] Added to {topic_dir.name}/Memory.md: {orphan.name}")
+    return load_memory(cfg.memory_md)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -249,7 +277,7 @@ def main():
             print(f"  {o.relative_to(cfg.vault_root)}")
         if args.fix:
             memory_text = fix_orphans(orphans, memory_text)
-            cfg.memory_md.write_text(memory_text, encoding="utf-8")
+            # fix_orphans writes topic Memory.md files directly; memory_text is refreshed
     else:
         print("[ok]  No orphan pages")
 

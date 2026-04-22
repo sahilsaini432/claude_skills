@@ -35,11 +35,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from config import cfg
 from llm import call_local
-from wiki_index import append_log, insert_entry, load_memory, slugify, posix_rel
+from wiki_index import (
+    append_log,
+    load_memory,
+    slugify,
+    posix_rel,
+    insert_topic_entry,
+    ensure_master_has_topic,
+)
 
 RELEVANCE_SYSTEM = """\
 You are a search assistant for a personal knowledge wiki.
-Given a question and the wiki index (Memory.md), identify which topic sections are most relevant.
+Given a question and the wiki index (Memory.md), identify which topics are most relevant.
+The wiki index lists topic names as link display text, e.g. "- [Topic Name](path)".
 Return ONLY valid JSON, no fences:
 {
   "topics": ["Topic Name 1", "Topic Name 2"],
@@ -93,30 +101,41 @@ def find_relevant_topics(question: str, memory_text: str) -> list[str]:
 
 
 def load_topic_pages(topics: list[str], memory_text: str) -> list[tuple[str, str]]:
-    """Load wiki pages for the given topics. Returns [(slug, content)]."""
+    """Load wiki pages for the given topics. Returns [(slug, content)].
+
+    Reads master Memory.md for topic links, then per-topic Memory.md for page paths.
+    """
     pages = []
-    # Load _overview.md first for context
+
+    # Load _overview.md first for each relevant topic
     for topic in topics:
         overview = cfg.wiki_dir / slugify(topic) / "_overview.md"
         if overview.exists():
             content = overview.read_text(encoding="utf-8")
             pages.append((f"[overview] {topic}", content))
 
-    # Load individual pages
-    current_topic = None
-    in_relevant = False
+    # Parse master Memory.md for topic links (format: - [Topic](wiki/topic/Memory.md))
     for line in memory_text.splitlines():
-        if line.startswith("## "):
-            current_topic = line[3:].strip()
-            in_relevant = not topics or current_topic in topics
+        m = re.match(r"-\s+\[([^\]]+)\]\(([^)]+\.md)\)", line)
+        if not m:
             continue
-        if in_relevant:
-            m = re.match(r"-\s+\[([^\]]+)\]\(([^)]+)\)", line)
-            if m:
-                page_path = cfg.vault_root / m.group(2)
+        topic_name = m.group(1)
+        if topics and topic_name not in topics:
+            continue
+        topic_mem_path = cfg.vault_root / m.group(2)
+        if not topic_mem_path.exists():
+            continue
+        topic_dir = topic_mem_path.parent
+        topic_mem_text = topic_mem_path.read_text(encoding="utf-8")
+
+        # Parse per-topic Memory.md for page paths (local paths relative to topic_dir)
+        for tline in topic_mem_text.splitlines():
+            tm = re.match(r"-\s+\[([^\]]+)\]\(([^)]+)\)", tline)
+            if tm:
+                page_path = topic_dir / tm.group(2)
                 if page_path.exists():
                     content = page_path.read_text(encoding="utf-8")
-                    pages.append((m.group(1), content))
+                    pages.append((tm.group(1), content))
 
     return pages
 
@@ -143,11 +162,11 @@ def save_answer(question: str, answer_file: Path):
     page_path = topic_dir / f"{slug}.md"
     page_path.write_text(page_content, encoding="utf-8")
 
-    memory_text = load_memory(cfg.memory_md)
-    rel = posix_rel(page_path.relative_to(cfg.vault_root))
-    memory_entry = f"- [{slug}]({rel}) — Q: {question[:60]}"
-    updated = insert_entry(memory_text, topic, memory_entry, today)
-    cfg.memory_md.write_text(updated, encoding="utf-8")
+    local_path = posix_rel(page_path.relative_to(topic_dir))
+    memory_entry = f"- [{slug}]({local_path}) — Q: {question[:60]}"
+    insert_topic_entry(topic_dir, memory_entry, today)
+    topic_mem_rel = posix_rel((topic_dir / "Memory.md").relative_to(cfg.vault_root))
+    ensure_master_has_topic(cfg.memory_md, topic, topic_mem_rel, today)
 
     append_log(cfg.log_md, "query-saved", f"{question[:60]} → {slug}.md")
     print(f"[ok] Answer filed: wiki/{topic_folder}/{slug}.md")

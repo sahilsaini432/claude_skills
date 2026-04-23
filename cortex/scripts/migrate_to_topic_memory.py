@@ -75,7 +75,7 @@ def main():
         entries_block = "\n".join(entry_lines)
         topic_mem_content = (
             f"# {topic}\n\n"
-            f"> Pages in this topic. Managed by brain-wiki — do not edit manually.\n\n"
+            f"> Pages in this topic. Managed by cortex — do not edit manually.\n\n"
             f"---\n\n"
             f"{entries_block}\n\n"
             f"---\n"
@@ -97,7 +97,7 @@ def main():
     new_master = (
         "# Memory\n\n"
         "> Personal knowledge wiki index. Each topic has its own Memory.md with its pages.\n"
-        "> Managed by brain-wiki — do not edit manually.\n\n"
+        "> Managed by cortex — do not edit manually.\n\n"
         "---\n\n"
         + "\n".join(master_entries)
         + "\n\n---\n"

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ingest.py — Ingest any source file into the brain-wiki.
+ingest.py — Ingest any source file into the cortex.
 
 Usage:
     python scripts/ingest.py <source_file>
@@ -199,7 +199,7 @@ Return ONLY markdown — no fences, no preamble.
 <Leave blank — will be filled by back-patching>
 
 ---
-*Ingested by brain-wiki*
+*Ingested by cortex*
 """
 
 WIKI_PAGE_WITH_RELATED_SYSTEM = """\
@@ -237,7 +237,7 @@ Return ONLY markdown — no fences, no preamble.
 Order chronologically if dates are available.>
 
 ---
-*Ingested by brain-wiki*
+*Ingested by cortex*
 """
 
 MERGE_SYSTEM = """\
@@ -276,7 +276,7 @@ Return ONLY markdown — no fences, no preamble.
 <Running synthesis — stub for now, updated as pages are added.>
 
 ---
-*Managed by brain-wiki*
+*Managed by cortex*
 """
 
 
@@ -535,7 +535,7 @@ def _add_overview_link(page_path: Path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Ingest a source into brain-wiki")
+    parser = argparse.ArgumentParser(description="Ingest a source into cortex")
     parser.add_argument("source", nargs="?", help="Path to source file")
     parser.add_argument("--raw-chats-path", action="store_true", help="Print the raw/chats/ path and exit")
     parser.add_argument(
@@ -640,7 +640,7 @@ def main():
                     break
 
         print("\n" + "=" * 70)
-        print("BRAIN-WIKI CLAUDE-CHAT PHASE 1")
+        print("cortex CLAUDE-CHAT PHASE 1")
         print("=" * 70)
         print(f"SOURCE_NAME: {source_name}")
         print(f"SOURCE_TYPE: {source_type}")
@@ -671,7 +671,7 @@ def main():
             "     ## Related Pages\n"
             "     - [_overview](_overview.md) — topic index\n"
             "     ---\n"
-            "     *Ingested by brain-wiki*\n"
+            "     *Ingested by cortex*\n"
             "4. Extract 3-8 significant entities (tools, frameworks, people, concepts).\n"
             "5. Write the wiki page markdown to a temp file.\n"
             "6. Write the entities as JSON to a temp file:\n"
@@ -893,7 +893,7 @@ def main():
                 f"- [{slug}]({rel_page}) — {description}\n\n"
                 f"## Evolving Thesis\n"
                 f"<!-- stub -->\n\n"
-                f"---\n*Managed by brain-wiki*\n",
+                f"---\n*Managed by cortex*\n",
                 encoding="utf-8",
             )
             print("  [ok] _overview.md created (stub)")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-lint.py — Health-check the brain-wiki. Read-only by default.
+lint.py — Health-check the cortex. Read-only by default.
 
 Usage:
     python3 scripts/lint.py [--fix]
@@ -211,7 +211,7 @@ def fix_missing_overviews(missing: list[Path]):
             slug = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", p.stem)
             stub += f"- [{slug}]({p.name})\n"
 
-        stub += f"\n---\n*Created by brain-wiki lint on {today}*\n"
+        stub += f"\n---\n*Created by cortex lint on {today}*\n"
         overview = topic_dir / "_overview.md"
         overview.write_text(stub, encoding="utf-8")
         print(f"  [fix] Created stub: {overview.relative_to(cfg.vault_root)}")
@@ -238,7 +238,7 @@ def fix_orphans(orphans: list[Path]) -> str:
 
 
 def main():
-    parser = __import__("argparse").ArgumentParser(description="Lint the brain-wiki")
+    parser = __import__("argparse").ArgumentParser(description="Lint the cortex")
     parser.add_argument(
         "--fix",
         action="store_true",
@@ -257,7 +257,7 @@ def main():
     all_clear = True
     today = date.today().isoformat()
 
-    print("\nbrain-wiki lint\n" + "─" * 40)
+    print("\ncortex lint\n" + "─" * 40)
 
     # 1. Dead links
     dead = check_dead_links(memory_text)

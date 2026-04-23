@@ -14,7 +14,7 @@ MEMORY_TEMPLATE = """\
 # Memory
 
 > Personal knowledge wiki index. Each topic has its own Memory.md with its pages.
-> Managed by brain-wiki — do not edit manually.
+> Managed by cortex — do not edit manually.
 
 ---
 
@@ -25,7 +25,7 @@ MEMORY_TEMPLATE = """\
 TOPIC_MEMORY_TEMPLATE = """\
 # {topic}
 
-> Pages in this topic. Managed by brain-wiki — do not edit manually.
+> Pages in this topic. Managed by cortex — do not edit manually.
 
 ---
 
@@ -36,7 +36,7 @@ TOPIC_MEMORY_TEMPLATE = """\
 LOG_TEMPLATE = """\
 # Log
 
-> Append-only record of all brain-wiki operations.
+> Append-only record of all cortex operations.
 
 ---
 

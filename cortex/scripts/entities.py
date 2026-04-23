@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-entities.py — Entity registry and page management for brain-wiki.
+entities.py — Entity registry and page management for cortex.
 
 Tracks how many times each entity/concept has been seen across ingests.
 Creates or updates entity pages in wiki/_entities/ on second appearance.
@@ -90,7 +90,7 @@ Return ONLY markdown — no fences, no preamble. Temperature: be factual and con
 <Leave blank — filled by back-patching>
 
 ---
-*Managed by brain-wiki*
+*Managed by cortex*
 """
 
 ENTITY_UPDATE_SYSTEM = """\
@@ -134,7 +134,7 @@ Return ONLY markdown — no fences, no preamble. Be factual and consistent.
 <Leave blank — filled by back-patching>
 
 ---
-*Managed by brain-wiki*
+*Managed by cortex*
 """
 
 

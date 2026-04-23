@@ -1,9 +1,9 @@
 ---
-name: brain-wiki
+name: cortex
 description: Personal knowledge wiki builder. Ingests any source (PDF, web article, image, transcript, chat session, plain text) into a structured, interlinked Obsidian vault maintained by a local LLM. Use when the user says "ingest this", "add this to my wiki", "summarize and save", "add this to my brain", "save this chat", "query my wiki", "what do I know about X", "lint my wiki", "health check my notes", or anything implying they want to build, search, or maintain a personal knowledge base. Also triggers for "summarize this chat", "save this conversation", or "export session notes" — chat sessions are one supported source type.
 ---
 
-# brain-wiki
+# cortex
 
 A personal knowledge wiki that compiles and maintains structured, interlinked markdown pages
 from any source you feed it. Lives in your Obsidian vault. Syncs to GitHub automatically.
@@ -101,10 +101,10 @@ synthesizes the wiki page with zero Ollama calls. Only pass `--ollama` when you
 explicitly want the local pipeline (overnight batch, scripted runs).
 
 ```
-/brain-wiki ingest /path/to/file.pdf        ← default: claude-chat mode
-/brain-wiki ingest https://example.com/article
-/brain-wiki query "what do I know about reinforcement learning?"
-/brain-wiki lint --fix
+/cortex ingest /path/to/file.pdf        ← default: claude-chat mode
+/cortex ingest https://example.com/article
+/cortex query "what do I know about reinforcement learning?"
+/cortex lint --fix
 ```
 
 Or naturally:
@@ -145,13 +145,13 @@ This is a **two-phase protocol**:
 ### Phase 1 — print synthesis prompt, exit 2
 
 ```bash
-python3 ~/.claude/skills/brain-wiki/scripts/ingest.py <file>
+python3 ~/.claude/skills/cortex/scripts/ingest.py <file>
 ```
 
 The script:
 
 1. Reads the source file
-2. Prints a `BRAIN-WIKI CLAUDE-CHAT PHASE 1` block to stdout containing:
+2. Prints a `cortex CLAUDE-CHAT PHASE 1` block to stdout containing:
    - `SOURCE_NAME`, `SOURCE_TYPE`, `SOURCE_PATH`, `TODAY`, `AUTO_SLUG`
    - `EXISTING_PAGE` — path to any existing page with the same slug (merge hint)
    - `MEMORY_MD_EXCERPT` — first 3000 chars of Memory.md for topic classification
@@ -174,7 +174,7 @@ Claude Code must:
 5. Re-run ingest.py with:
 
 ```bash
-python3 ~/.claude/skills/brain-wiki/scripts/ingest.py <SOURCE_PATH> --yes \
+python3 ~/.claude/skills/cortex/scripts/ingest.py <SOURCE_PATH> --yes \
   --page-content-file /tmp/wiki_page.md \
   --entities-file /tmp/entities.json \
   --topic "Topic Name" \
@@ -205,7 +205,7 @@ or any similar phrase — **always follow these exact steps, no shortcuts**:
 ### Step 1 — Get the raw/chats path
 
 ```bash
-python3 ~/.claude/skills/brain-wiki/scripts/ingest.py --raw-chats-path
+python3 ~/.claude/skills/cortex/scripts/ingest.py --raw-chats-path
 ```
 
 This prints the full path to `raw/chats/` from your vault. Use it as the destination
@@ -222,7 +222,7 @@ Do NOT summarize or paraphrase — write the raw verbatim content.
 ```bash
 python3 -c "
 import pathlib, sys
-sys.path.insert(0, str(pathlib.Path.home() / '.claude/skills/brain-wiki/scripts'))
+sys.path.insert(0, str(pathlib.Path.home() / '.claude/skills/cortex/scripts'))
 from config import cfg
 cfg.ensure_dirs()
 transcript = '''USER: <exact message>
@@ -237,7 +237,7 @@ print(dest)
 ### Step 3 — Run ingest
 
 ```bash
-python3 ~/.claude/skills/brain-wiki/scripts/ingest.py <path printed above> --yes
+python3 ~/.claude/skills/cortex/scripts/ingest.py <path printed above> --yes
 ```
 
 Default mode is claude-chat — the script prints phase 1 output and exits with code 2.

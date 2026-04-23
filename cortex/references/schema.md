@@ -33,7 +33,7 @@ How this source relates to other things in the wiki.
 - [other-slug](other-slug-YYYY-MM-DD.md) — optional additional context
 
 ---
-*Ingested by brain-wiki*
+*Ingested by cortex*
 ```
 
 **Link model** (forms distinct topic clusters in Obsidian graph view):
@@ -66,7 +66,7 @@ connected at their centers instead of collapsing into one blob.
 Running synthesis — updated every time a new page is added to this topic.
 
 ---
-*Managed by brain-wiki*
+*Managed by cortex*
 ```
 
 ---
@@ -77,12 +77,12 @@ Running synthesis — updated every time a new page is added to this topic.
 # Memory
 
 > Auto-maintained index of all wiki pages, grouped by topic.
-> Managed by brain-wiki — do not edit manually.
+> Managed by cortex — do not edit manually.
 
 ---
 
 ## Claude Code & Skills
-- [skill-builder-2026-04-10](wiki/claude-code-and-skills/skill-builder-2026-04-10.md) — Built brain-wiki skill with Ollama integration
+- [skill-builder-2026-04-10](wiki/claude-code-and-skills/skill-builder-2026-04-10.md) — Built cortex skill with Ollama integration
 
 ## Python & Data Science
 - [ppo-frozenlake-2026-04-01](wiki/python-and-data-science/ppo-frozenlake-2026-04-01.md) — PPO training loop for FrozenLake

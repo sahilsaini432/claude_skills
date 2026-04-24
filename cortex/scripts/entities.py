@@ -192,7 +192,7 @@ def process_entities(
     today: str,
 ) -> list[Path]:
     """
-    Update entity registry. Create entity pages for entities seen 2+ times.
+    Update entity registry. Create or update entity pages on every appearance.
     Returns list of entity page paths that were created or updated.
     """
     registry = load_registry()
@@ -218,7 +218,7 @@ def process_entities(
                 "first_seen": today,
                 "sources": [source_slug],
             }
-            print(f"  [entity] First seen: {name} (registered, page on 2nd appearance)")
+            print(f"  [entity] First seen: {name}")
         else:
             # Avoid duplicate source entries
             if source_slug not in registry[slug]["sources"]:
@@ -230,19 +230,112 @@ def process_entities(
             count = registry[slug]["count"]
             print(f"  [entity] Seen {count}x: {name}")
 
-            # Create or update entity page on 2nd+ appearance
-            if registry[slug]["count"] >= 2:
-                entity_page = entity_dir / f"{slug}.md"
-                if entity_page.exists():
-                    _update_entity_page(entity_page, name, source_content, source_slug, today, registry[slug])
-                else:
-                    _create_entity_page(
-                        entity_page, name, slug, etype, source_content, source_slug, today, registry[slug]
-                    )
-                touched_pages.append(entity_page)
+        # Always create or update entity page
+        entity_page = entity_dir / f"{slug}.md"
+        if entity_page.exists():
+            _update_entity_page(entity_page, name, source_content, source_slug, today, registry[slug])
+        else:
+            _create_entity_page(
+                entity_page, name, slug, etype, source_content, source_slug, today, registry[slug]
+            )
+        touched_pages.append(entity_page)
 
     save_registry(registry)
     return touched_pages
+
+
+def backfill_missing_entity_pages(today: str, pages_json: str | None = None) -> int:
+    """
+    Create entity pages for all registry entries that don't have a page yet.
+
+    Phase 1 (no pages_json): prints a CLAUDE-CHAT BACKFILL block and exits with code 2.
+    Phase 2 (pages_json set): reads {"slug": "markdown content"} and commits pages to disk.
+    Returns count of pages created.
+    """
+    registry = load_registry()
+    entity_dir = _entity_dir()
+
+    # ── Phase 2: commit pages written by Claude Code ─────────────────────────
+    if pages_json is not None:
+        data = json.loads(Path(pages_json).read_text(encoding="utf-8"))
+        created = 0
+        for slug, content in data.items():
+            page_path = entity_dir / f"{slug}.md"
+            if not page_path.exists():
+                page_path.write_text(content, encoding="utf-8")
+                print(f"  [backfill] Committed: _entities/{slug}.md")
+                created += 1
+        print(f"  [backfill] Done — {created} entity page(s) created.")
+        return created
+
+    # ── Phase 1: collect missing entities, print synthesis prompt, exit 2 ────
+    missing = []
+    for slug, entry in registry.items():
+        if (entity_dir / f"{slug}.md").exists():
+            continue
+        sources = entry.get("sources", [])
+        excerpts = _gather_source_excerpts(sources, "", sources[0] if sources else slug)
+        missing.append(
+            {
+                "slug": slug,
+                "name": entry.get("name", slug),
+                "type": entry.get("type", "concept"),
+                "description": entry.get("description", ""),
+                "count": entry.get("count", 1),
+                "first_seen": entry.get("first_seen", today),
+                "sources": sources,
+                "excerpts": excerpts[:1500],
+            }
+        )
+
+    if not missing:
+        print("  [backfill] No missing entity pages found.")
+        return 0
+
+    print(f"\n{'=' * 70}")
+    print("cortex CLAUDE-CHAT BACKFILL PHASE 1")
+    print(f"{'=' * 70}")
+    print(f"MISSING_COUNT: {len(missing)}")
+    print(f"TODAY: {today}")
+    print(f"ENTITY_DIR: {entity_dir}")
+    print()
+    print("ENTITIES_JSON:")
+    print(json.dumps(missing, indent=2))
+    print()
+    print("SCHEMA (use for every page):")
+    print(
+        """
+# <Entity Name>
+
+**Type:** <type>
+**First seen:** <first_seen date>
+**Times referenced:** <count>
+
+---
+
+## What it is
+<2-4 sentence factual description based on description field and source excerpts>
+
+## Key Facts
+- <key fact 1>
+- <key fact 2>
+
+## How it's been used
+<how this entity appears in the context of the sources listed>
+
+## Related Pages
+
+---
+*Managed by cortex*
+"""
+    )
+    print("INSTRUCTIONS FOR CLAUDE CODE:")
+    print(f"1. Generate one wiki page per entity using the schema above.")
+    print(f'2. Write all pages as a single JSON file: {{"slug": "full page markdown", ...}}')
+    print(f"3. Re-run to commit:")
+    print(f"   python3 ~/.claude/skills/cortex/scripts/entities.py --backfill --pages-json <path>")
+    print(f"{'=' * 70}")
+    sys.exit(2)
 
 
 def _create_entity_page(
@@ -434,3 +527,26 @@ def link_source_to_entity_pages(
             rel = (Path("..") / link_target.relative_to(cfg.wiki_dir.parent)).as_posix()
         entry = f"- [{topic_display}]({rel}) — {link_desc}"
         backpatch_file(ep, entry, call_local_fn, timeout=timeout)
+
+
+if __name__ == "__main__":
+    import argparse
+    from datetime import date
+
+    parser = argparse.ArgumentParser(description="Entity registry tools")
+    parser.add_argument(
+        "--backfill", action="store_true", help="Create pages for registry entries missing pages"
+    )
+    parser.add_argument(
+        "--pages-json", help="Phase 2: path to JSON file with {slug: markdown} written by Claude Code"
+    )
+    parser.add_argument(
+        "--date", default=str(date.today()), help="Date to use for created pages (YYYY-MM-DD)"
+    )
+    args = parser.parse_args()
+
+    if args.backfill:
+        cfg.ensure_dirs()
+        backfill_missing_entity_pages(args.date, pages_json=args.pages_json)
+    else:
+        parser.print_help()

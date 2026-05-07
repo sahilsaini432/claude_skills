@@ -167,7 +167,7 @@ Return ONLY valid JSON, no fences:
 """
 
 WIKI_PAGE_SYSTEM = """\
-You are building a personal knowledge wiki. Given source content, write a structured wiki page.
+You are building a personal knowledge wiki. Given source content, write a structured wiki page that a reader unfamiliar with the topic can pick up cold and understand without re-reading the original.
 
 Return ONLY markdown — no fences, no preamble.
 
@@ -180,11 +180,22 @@ Return ONLY markdown — no fences, no preamble.
 ---
 
 ## Summary
-<3–5 sentence synthesis of the key ideas>
+<1–2 paragraph synthesis. Cover what the source is about, why it matters, and the core ideas. Write so a reader new to the topic can grasp the gist quickly.>
+
+## Background / Context
+<Prerequisite concepts, terminology, or domain context a non-expert reader would need before reading the rest. Explain jargon plainly. OMIT THIS SECTION ENTIRELY if the topic is common knowledge or has no special prerequisites.>
 
 ## Key Points
-- <point 1>
-- <point 2>
+- <scannable bullet — main takeaway>
+- <bullet 2>
+
+## Detailed Notes
+<Preserve the source's structured content verbatim where present:
+- Tables → reproduce as markdown tables, preserving column structure
+- Code → fenced code blocks with the correct language tag
+- Tutorials / numbered steps → numbered lists, in order
+- Diagrams / charts / figures → short text description of what is depicted
+OMIT THIS SECTION ENTIRELY if the source is pure prose with no structured content.>
 
 ## Concepts & Entities
 <Notable people, tools, frameworks, ideas — one line each>
@@ -203,7 +214,7 @@ Return ONLY markdown — no fences, no preamble.
 """
 
 WIKI_PAGE_WITH_RELATED_SYSTEM = """\
-You are building a personal knowledge wiki. Given source content and related existing pages, write a structured wiki page.
+You are building a personal knowledge wiki. Given source content and related existing pages, write a structured wiki page that a reader unfamiliar with the topic can pick up cold and understand without re-reading the original.
 
 Return ONLY markdown — no fences, no preamble.
 
@@ -216,11 +227,22 @@ Return ONLY markdown — no fences, no preamble.
 ---
 
 ## Summary
-<3–5 sentence synthesis of the key ideas>
+<1–2 paragraph synthesis. Cover what the source is about, why it matters, and the core ideas. Write so a reader new to the topic can grasp the gist quickly.>
+
+## Background / Context
+<Prerequisite concepts, terminology, or domain context a non-expert reader would need before reading the rest. Explain jargon plainly. OMIT THIS SECTION ENTIRELY if the topic is common knowledge or has no special prerequisites.>
 
 ## Key Points
-- <point 1>
-- <point 2>
+- <scannable bullet — main takeaway>
+- <bullet 2>
+
+## Detailed Notes
+<Preserve the source's structured content verbatim where present:
+- Tables → reproduce as markdown tables, preserving column structure
+- Code → fenced code blocks with the correct language tag
+- Tutorials / numbered steps → numbered lists, in order
+- Diagrams / charts / figures → short text description of what is depicted
+OMIT THIS SECTION ENTIRELY if the source is pure prose with no structured content.>
 
 ## Concepts & Entities
 <Notable people, tools, frameworks, ideas — one line each>
@@ -244,8 +266,17 @@ MERGE_SYSTEM = """\
 You are updating an existing wiki page with new information from a follow-up session.
 
 Rules — strictly follow these:
-1. Expand and update ## Summary, ## Key Points, ## Concepts & Entities, ## Connections
-   with new information from the new session. Do not remove existing content — only add or refine.
+1. Expand and update ## Summary, ## Background / Context, ## Key Points, ## Detailed Notes,
+   ## Concepts & Entities, ## Connections with new information from the new session.
+   Do not remove existing content — only add or refine.
+   - If the existing page lacks ## Background / Context but the new source warrants it
+     (introduces unfamiliar prerequisites or jargon), ADD that section.
+   - If the existing page lacks ## Detailed Notes but the new source contains tables,
+     code, numbered steps, or other structured content, ADD that section, reproducing
+     tables as markdown tables, code as fenced blocks with language tags, and steps
+     as numbered lists.
+   - If neither section is warranted by the existing page or the new source, do not
+     add empty placeholders.
 2. Update **Date ingested** to show both dates: "first-date / updated-date"
 3. Append new **Source** filenames to the existing Source line (comma-separated)
 4. PRESERVE the ## Related Pages section EXACTLY as-is — do not add, remove, or reword any links
@@ -663,8 +694,14 @@ def main():
             "     # Title\n"
             "     **Source:** ... | **Date ingested:** ... | **Type:** ...\n"
             "     ---\n"
-            "     ## Summary\n"
+            "     ## Summary                  ← 1–2 paragraphs; readable cold by someone new to the topic\n"
+            "     ## Background / Context     ← OPTIONAL — prerequisites/jargon. Omit if topic is common knowledge.\n"
             "     ## Key Points\n"
+            "     ## Detailed Notes           ← OPTIONAL — preserve source structure verbatim:\n"
+            "                                   tables → markdown tables, code → fenced blocks with language,\n"
+            "                                   numbered steps/tutorials → numbered lists in order,\n"
+            "                                   diagrams/charts → short text description.\n"
+            "                                   Omit entirely if source has no structured content.\n"
             "     ## Concepts & Entities\n"
             "     ## Quotes / Highlights\n"
             "     ## Connections\n"
@@ -672,6 +709,9 @@ def main():
             "     - [_overview](_overview.md) — topic index\n"
             "     ---\n"
             "     *Ingested by cortex*\n"
+            "   Goal: the page should stand alone as an explainer — a reader unfamiliar with\n"
+            "   the topic should be able to pick it up cold and understand without re-reading\n"
+            "   the source.\n"
             "4. Extract 3-8 significant entities (tools, frameworks, people, concepts).\n"
             "5. Write the wiki page markdown to a temp file.\n"
             "6. Write the entities as JSON to a temp file:\n"

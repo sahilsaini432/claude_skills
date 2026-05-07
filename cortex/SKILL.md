@@ -59,7 +59,7 @@ E:\brain\
 │   └── chats/
 └── wiki/                        ← LLM-owned wiki pages
     ├── _entities/               ← shared entity/concept pages (cross-topic)
-    │   ├── sdl2.md              ← created on 2nd appearance across any source
+    │   ├── sdl2.md              ← created on first appearance, updated on each subsequent one
     │   └── reinforcement-learning.md
     └── <topic-folder>/
         ├── _overview.md         ← living topic synthesis
@@ -84,8 +84,8 @@ After writing each wiki page, `ingest.py` automatically:
 1. **Extracts entities** — asks `gemma4:26b` to identify significant tools, frameworks,
    algorithms, people, and concepts from the source (3–8 per source, quality over quantity)
 2. **Updates `entity_registry.json`** — tracks how many times each entity has been seen
-3. **Creates entity pages on 2nd appearance** — `wiki/_entities/<slug>.md` is created
-   the second time an entity appears, back-filled with content from both sources
+3. **Creates entity pages on first appearance** — `wiki/_entities/<slug>.md` is created
+   the first time an entity is extracted from any source, seeded with content from that source
 4. **Updates entity pages on subsequent appearances** — new facts merged in, count updated
 5. **Cross-links** — source wiki pages link to entity pages; entity pages link back to
    topic `_overview.md` files (not individual source pages) to preserve distinct clusters
@@ -166,7 +166,11 @@ Claude Code must:
 1. **Classify** the source against `MEMORY_MD_EXCERPT` — pick a topic, confirm/revise the slug, write a ≤12-word description.
 2. **Write the wiki page** using the standard schema (same as normal ingest):
    - `# Title`, `**Source:**`, `**Date ingested:**`, `**Type:**`
-   - `## Summary`, `## Key Points`, `## Concepts & Entities`
+   - `## Summary` ← 1–2 paragraphs; readable cold by someone new to the topic
+   - `## Background / Context` ← OPTIONAL — prerequisites/jargon. Omit if topic is common knowledge.
+   - `## Key Points`
+   - `## Detailed Notes` ← OPTIONAL — preserve source structure verbatim (tables as markdown tables, code as fenced blocks with language tags, numbered steps as numbered lists, diagrams as short text descriptions). Omit if source has no structured content.
+   - `## Concepts & Entities`
    - `## Quotes / Highlights`, `## Connections`
    - `## Related Pages` ← leave blank
 3. **Extract 3–8 entities** as JSON: `[{"name":…,"slug":…,"description":…,"type":…},…]`

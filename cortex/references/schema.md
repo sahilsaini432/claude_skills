@@ -2,6 +2,12 @@
 
 ## Wiki page format
 
+A wiki page should stand alone as an explainer — a reader unfamiliar with the
+topic should be able to pick it up cold and understand without re-reading the
+source. Two sections (`## Background / Context` and `## Detailed Notes`) are
+optional and should be **omitted entirely** when not warranted, rather than left
+as empty placeholders.
+
 ```markdown
 # <Title>
 
@@ -12,11 +18,23 @@
 ---
 
 ## Summary
-3–5 sentence synthesis of the key ideas.
+1–2 paragraph synthesis. Cover what the source is about, why it matters, and
+the core ideas. Written so a reader new to the topic can grasp the gist quickly.
+
+## Background / Context        <!-- OPTIONAL: omit if topic is common knowledge -->
+Prerequisite concepts, terminology, or domain context a non-expert reader would
+need before reading the rest. Explain jargon plainly.
 
 ## Key Points
 - Point 1
 - Point 2
+
+## Detailed Notes              <!-- OPTIONAL: omit if source has no structured content -->
+Preserve the source's structured content verbatim where present:
+- Tables → reproduce as markdown tables, preserving column structure
+- Code → fenced code blocks with the correct language tag
+- Tutorials / numbered steps → numbered lists, in order
+- Diagrams / charts / figures → short text description of what is depicted
 
 ## Concepts & Entities
 Notable people, tools, frameworks, ideas — one line each.
@@ -35,6 +53,16 @@ How this source relates to other things in the wiki.
 ---
 *Ingested by cortex*
 ```
+
+**When to emit each optional section:**
+
+| Section | Emit when… | Skip when… |
+|---------|------------|------------|
+| `## Background / Context` | Source uses jargon, assumes prerequisites, or covers a niche domain | Topic is common knowledge or has no special prerequisites |
+| `## Detailed Notes` | Source contains tables, code, numbered steps, tutorials, or diagrams | Source is pure prose with no structured content |
+
+Pages written under the older schema (without these two sections) remain valid;
+they upgrade naturally on merge if a follow-up source warrants the new sections.
 
 **Link model** (forms distinct topic clusters in Obsidian graph view):
 

@@ -3,7 +3,8 @@
 entities.py — Entity registry and page management for cortex.
 
 Tracks how many times each entity/concept has been seen across ingests.
-Creates or updates entity pages in wiki/_entities/ on second appearance.
+Creates an entity page in wiki/_entities/ on first appearance and updates
+it on every subsequent appearance.
 
 Registry file: <vault_root>/entity_registry.json
 Entity pages:  <vault_root>/wiki/_entities/<entity-slug>.md

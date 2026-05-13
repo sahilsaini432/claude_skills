@@ -5,8 +5,8 @@ lint.py — Health-check the cortex. Read-only by default.
 Usage:
     python3 scripts/lint.py [--fix]
 
-    --fix   Only performs safe, non-LLM structural fixes:
-            - Creates missing _overview.md stubs (no LLM, just a placeholder)
+    --fix   Performs safe structural fixes:
+            - Creates missing _overview.md stubs (just a placeholder)
             - Adds orphan pages to Memory.md index
 
     Everything else is report-only. lint.py never touches ## Related Pages sections.
@@ -18,7 +18,6 @@ Checks:
     3. Missing overviews — topic folders with pages but no _overview.md
     4. Missing cross-refs — pages in same topic not linked to each other
     5. Entity registry   — entities seen 2+ times with no page, or pages with no registry entry
-    6. Contradiction scan — LLM reads each topic's pages and flags inconsistencies (report only)
 """
 
 import json
@@ -29,20 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config import cfg
-from llm import call_local
 from wiki_index import append_log, load_memory, slugify, posix_rel, insert_topic_entry, ensure_master_has_topic
-
-CONTRADICTION_SYSTEM = """\
-You are reviewing wiki pages from the same topic for a personal knowledge base.
-Identify:
-1. Factual contradictions between pages
-2. Claims in older pages superseded by newer ones
-3. Important concepts mentioned but lacking their own page
-4. Knowledge gaps worth filling with new sources
-
-Return a concise markdown report. Be specific — name the pages and quote conflicting claims.
-If everything looks consistent, say so briefly.
-"""
 
 
 # ── Checks ────────────────────────────────────────────────────────────────────
@@ -163,39 +149,11 @@ def check_entity_registry() -> list[str]:
     return issues
 
 
-def scan_contradictions() -> dict[str, str]:
-    """Read-only LLM scan per topic. Returns {topic_name: report}."""
-    reports = {}
-    if not cfg.wiki_dir.exists():
-        return reports
-
-    for topic_dir in cfg.wiki_dir.iterdir():
-        if not topic_dir.is_dir() or topic_dir.name.startswith("_"):
-            continue
-        pages = [f for f in topic_dir.glob("*.md")
-                 if not f.name.startswith("_") and f.name != "Memory.md"]
-        if len(pages) < 2:
-            continue
-
-        topic_name = topic_dir.name.replace("-", " ").title()
-        print(f"  Scanning '{topic_name}' ({len(pages)} pages)...")
-
-        pages_block = "\n\n".join(
-            f"--- {p.name} ---\n{p.read_text(encoding='utf-8', errors='replace')[:2000]}"
-            for p in sorted(pages)
-        )
-        prompt = f"Topic: {topic_name}\n\nPages:\n\n{pages_block}"
-        reports[topic_name] = call_local(
-            prompt, CONTRADICTION_SYSTEM, timeout=cfg.timeout_long, label=f"scan {topic_name}"
-        )
-    return reports
-
-
-# ── Fix helpers (non-LLM only) ─────────────────────────────────────────────────
+# ── Fix helpers ───────────────────────────────────────────────────────────────
 
 
 def fix_missing_overviews(missing: list[Path]):
-    """Create a blank _overview.md stub — no LLM, just a placeholder."""
+    """Create a blank _overview.md stub — just a placeholder."""
     today = date.today().isoformat()
     for topic_dir in missing:
         topic_name = topic_dir.name.replace("-", " ").title()
@@ -242,9 +200,8 @@ def main():
     parser.add_argument(
         "--fix",
         action="store_true",
-        help="Apply safe non-LLM fixes: create missing _overview.md stubs, add orphans to Memory.md",
+        help="Apply safe fixes: create missing _overview.md stubs, add orphans to Memory.md",
     )
-    parser.add_argument("--no-scan", action="store_true", help="Skip the LLM contradiction scan (faster)")
     args = parser.parse_args()
 
     if hasattr(sys.stdout, "reconfigure"):
@@ -318,21 +275,6 @@ def main():
             print(e)
     else:
         print("[ok]  Entity registry consistent")
-
-    # 6. Contradiction scan (LLM, read-only)
-    if not args.no_scan:
-        print("\n[scan] Running contradiction scan (read-only, local model)...")
-        reports = scan_contradictions()
-        if reports:
-            print("\nContradiction / gap report:")
-            for topic, report in reports.items():
-                print(f"\n  [{topic}]")
-                for line in report.splitlines():
-                    print(f"    {line}")
-        else:
-            print("  No multi-page topics to scan yet.")
-    else:
-        print("[skip] Contradiction scan skipped (--no-scan)")
 
     # Summary
     print("\n" + "─" * 40)

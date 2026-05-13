@@ -110,7 +110,7 @@ Running synthesis — updated every time a new page is added to this topic.
 ---
 
 ## Claude Code & Skills
-- [skill-builder-2026-04-10](wiki/claude-code-and-skills/skill-builder-2026-04-10.md) — Built cortex skill with Ollama integration
+- [skill-builder-2026-04-10](wiki/claude-code-and-skills/skill-builder-2026-04-10.md) — Built cortex skill
 
 ## Python & Data Science
 - [ppo-frozenlake-2026-04-01](wiki/python-and-data-science/ppo-frozenlake-2026-04-01.md) — PPO training loop for FrozenLake

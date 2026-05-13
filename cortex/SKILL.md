@@ -1,22 +1,23 @@
 ---
 name: cortex
-description: Personal knowledge wiki builder. Ingests any source (PDF, web article, image, transcript, chat session, plain text) into a structured, interlinked Obsidian vault maintained by a local LLM. Use when the user says "ingest this", "add this to my wiki", "summarize and save", "add this to my brain", "save this chat", "query my wiki", "what do I know about X", "lint my wiki", "health check my notes", or anything implying they want to build, search, or maintain a personal knowledge base. Also triggers for "summarize this chat", "save this conversation", or "export session notes" — chat sessions are one supported source type.
+description: Personal knowledge wiki builder. Ingests any source (PDF, web article, image, transcript, chat session, plain text) into a structured, interlinked Obsidian vault. Use when the user says "ingest this", "add this to my wiki", "summarize and save", "add this to my brain", "save this chat", "query my wiki", "what do I know about X", "lint my wiki", "health check my notes", or anything implying they want to build, search, or maintain a personal knowledge base. Also triggers for "summarize this chat", "save this conversation", or "export session notes" — chat sessions are one supported source type.
 ---
 
 # cortex
 
-A personal knowledge wiki that compiles and maintains structured, interlinked markdown pages
-from any source you feed it. Lives in your Obsidian vault. Syncs to GitHub automatically.
+A personal knowledge wiki that compiles and maintains structured, interlinked
+markdown pages from any source you feed it. Lives in your Obsidian vault.
 
-All LLM work runs locally via `gemma4:26b` (Ollama) — no API keys, no cloud calls.
-Queries are answered by Claude Code itself, reading the relevant pages directly.
+All synthesis is done by Claude Code itself — no local LLM, no API keys, no
+cloud calls. The Python scripts only do file IO, classification routing, and
+deterministic linking. Each operation that needs synthesis runs as a two-phase
+flow: phase 1 prints a structured prompt and exits with code 2; Claude Code
+reads the prompt, writes the page, and re-runs the script with the result.
 
 ## Prerequisites
 
 ```bash
-ollama serve
-ollama pull gemma4:26b
-pip install pymupdf          # for PDF ingestion
+pip install pymupdf          # for PDF ingestion (only PDF needs this)
 ```
 
 ## .env setup
@@ -29,19 +30,9 @@ The skill always looks for its config at:
 
 ```dotenv
 BRAIN_VAULT_ROOT=E:\brain
-
-# LLM connection — defaults shown, override for remote Ollama (e.g. Tailscale)
-LOCAL_LLM_URL=http://localhost:11434/api/generate
-LOCAL_LLM_MODEL=gemma4:26b
-
-# Timeouts in seconds — increase if Ollama is on a remote/slow machine
-LLM_TIMEOUT_SHORT=300    # classify, relevance, image reads
-LLM_TIMEOUT_MEDIUM=600   # overview, merge, backpatch
-LLM_TIMEOUT_LONG=900     # full wiki page generation
 ```
 
-Only `BRAIN_VAULT_ROOT` is required. All other keys have sensible defaults.
-The timeouts are generous by default — lower them if Ollama is local and fast.
+`BRAIN_VAULT_ROOT` is the only required key.
 
 ## Vault structure
 
@@ -57,12 +48,12 @@ E:\brain\
 │   ├── images/
 │   ├── notes/
 │   └── chats/
-└── wiki/                        ← LLM-owned wiki pages
+└── wiki/                        ← Claude-Code-owned wiki pages
     ├── _entities/               ← shared entity/concept pages (cross-topic)
-    │   ├── sdl2.md              ← created on first appearance, updated on each subsequent one
+    │   ├── sdl2.md              ← created on first appearance, enriched via --backfill
     │   └── reinforcement-learning.md
     └── <topic-folder>/
-        ├── _overview.md         ← living topic synthesis
+        ├── _overview.md         ← topic index (append-only)
         └── <slug>-YYYY-MM-DD.md ← links to relevant _entities/ pages
 ```
 
@@ -70,38 +61,41 @@ E:\brain\
 
 See `references/operations.md` for full details.
 
-| Command                  | What it does                                                                        | Model                                             |
-| ------------------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `ingest <file>`          | **Default: claude-chat mode** — Claude Code synthesizes the page; zero Ollama calls | Claude Code                                       |
-| `ingest <file> --ollama` | Opt-in: uses local Ollama for synthesis, merge, entities, back-patching             | gemma4:26b (local)                                |
-| `query "question"`       | Load relevant pages → print for Claude Code to answer                               | gemma4:26b (topic finding) + Claude Code (answer) |
-| `lint`                   | Orphans, dead links, missing overviews, contradiction scan                          | gemma4:26b (local)                                |
+| Command                             | What it does                                                                  |
+| ----------------------------------- | ----------------------------------------------------------------------------- |
+| `ingest <file>`                     | Two-phase: phase 1 prints synthesis prompt and exits 2; Claude Code synthesizes; phase 2 commits |
+| `query "question"`                  | Print Memory.md + every topic Memory.md and _overview.md; Claude Code reads relevant pages and answers |
+| `lint`                              | Dead-link, orphan, and entity-registry checks (deterministic, no LLM)         |
+| `entities.py --backfill`            | Two-phase: phase 1 lists stub/missing entity pages; Claude Code enriches them; phase 2 commits |
 
 ## Entity system
 
-After writing each wiki page, `ingest.py` automatically:
+After writing each wiki page, ingest phase 2 automatically:
 
-1. **Extracts entities** — asks `gemma4:26b` to identify significant tools, frameworks,
-   algorithms, people, and concepts from the source (3–8 per source, quality over quantity)
-2. **Updates `entity_registry.json`** — tracks how many times each entity has been seen
-3. **Creates entity pages on first appearance** — `wiki/_entities/<slug>.md` is created
-   the first time an entity is extracted from any source, seeded with content from that source
-4. **Updates entity pages on subsequent appearances** — new facts merged in, count updated
-5. **Cross-links** — source wiki pages link to entity pages; entity pages link back to
-   topic `_overview.md` files (not individual source pages) to preserve distinct clusters
+1. **Reads the entities JSON** Claude Code wrote during phase 1 — 3-8 significant
+   tools, frameworks, algorithms, people, or concepts (quality over quantity).
+2. **Updates `entity_registry.json`** — tracks how many times each entity has been
+   seen.
+3. **Creates a stub entity page on first appearance** — `wiki/_entities/<slug>.md`
+   gets a minimal placeholder with the entity's name, type, and description.
+4. **Bumps the count on subsequent appearances** — no content rewrite.
+5. **Cross-links** — source page links to entity pages; entity pages link back
+   to topic `_overview.md` files (not individual source pages) to preserve
+   distinct topic clusters.
 
-Entity pages live in `wiki/_entities/`. Each source page also gets a `[_overview](_overview.md)`
-parent link forming hub-and-spoke topology per topic. In Obsidian's graph this produces
-distinct topic clusters bridged at their centers (overview nodes) via entity pages.
+Run `python3 scripts/entities.py --backfill` later to enrich stubs into full
+entity pages — it prints a phase-1 prompt with all stub/missing entities, and
+Claude Code synthesizes proper pages.
+
+Entity pages live in `wiki/_entities/`. Each source page also gets a
+`[_overview](_overview.md)` parent link forming hub-and-spoke topology per
+topic. In Obsidian's graph this produces distinct topic clusters bridged at
+their centers (overview nodes) via entity pages.
 
 ## How to invoke in Claude Code
 
-Claude-chat mode is the **default** for `ingest`. No flag needed — Claude Code
-synthesizes the wiki page with zero Ollama calls. Only pass `--ollama` when you
-explicitly want the local pipeline (overnight batch, scripted runs).
-
 ```
-/cortex ingest /path/to/file.pdf        ← default: claude-chat mode
+/cortex ingest /path/to/file.pdf
 /cortex ingest https://example.com/article
 /cortex query "what do I know about reinforcement learning?"
 /cortex lint --fix
@@ -116,31 +110,35 @@ Or naturally:
 
 ## How query works in Claude Code
 
-`query.py` uses gemma4:26b only to identify which topics are relevant, then loads
-those wiki pages and prints them to stdout. Claude Code reads that output and synthesizes
-the answer directly — no API call, no extra cost. To file the answer back:
+`query.py` does no synthesis itself. It prints the master `Memory.md`, every
+per-topic `Memory.md`, and every topic `_overview.md`. Claude Code reads that
+output, identifies which source pages are relevant, uses its `Read` tool to
+load them, and synthesizes the answer in chat.
+
+To file an answer back into the wiki, write the answer as a complete
+markdown page first, then:
 
 ```bash
 python3 scripts/query.py "question" --save answer.md
 ```
 
+The file is stored verbatim under `wiki/queries-and-synthesis/`.
+
 ## Supported source types
 
-| Extension                   | Type                  | Handler                     |
-| --------------------------- | --------------------- | --------------------------- |
-| `http://` `https://` URL    | Article               | Fetch + HTML strip (stdlib) |
-| `.md` `.html`               | Article / Chat / Note | Text read                   |
-| `.txt`                      | Note                  | Text read                   |
-| `.pdf`                      | PDF                   | pymupdf text extraction     |
-| `.jpg` `.png` `.webp`       | Image                 | gemma4:26b vision           |
-| `.srt` `.vtt` `.transcript` | Transcript            | Timestamp-stripped text     |
+| Extension                   | Type                  | Handler                             |
+| --------------------------- | --------------------- | ----------------------------------- |
+| `http://` `https://` URL    | Article               | Fetch + HTML strip (stdlib)         |
+| `.md` `.html`               | Article / Chat / Note | Text read                           |
+| `.txt`                      | Note                  | Text read                           |
+| `.pdf`                      | PDF                   | pymupdf text extraction             |
+| `.jpg` `.png` `.webp`       | Image                 | Claude Code's Read tool (in phase 1) |
+| `.srt` `.vtt` `.transcript` | Transcript            | Timestamp-stripped text             |
 
-## Default claude-chat mode: Claude Code synthesizes the wiki page
+For images, phase 1 sets SOURCE_CONTENT to a placeholder pointing at the file.
+Claude Code uses its `Read` tool on the image directly to extract content.
 
-Default mode — zero Ollama calls. Claude Code reads the source and writes the
-wiki page itself. No warm-up, no GPU spin-up, no wait.
-
-This is a **two-phase protocol**:
+## Ingest two-phase protocol
 
 ### Phase 1 — print synthesis prompt, exit 2
 
@@ -151,7 +149,7 @@ python3 ~/.claude/skills/cortex/scripts/ingest.py <file>
 The script:
 
 1. Reads the source file
-2. Prints a `cortex CLAUDE-CHAT PHASE 1` block to stdout containing:
+2. Prints a `cortex PHASE 1` block to stdout containing:
    - `SOURCE_NAME`, `SOURCE_TYPE`, `SOURCE_PATH`, `TODAY`, `AUTO_SLUG`
    - `EXISTING_PAGE` — path to any existing page with the same slug (merge hint)
    - `MEMORY_MD_EXCERPT` — first 3000 chars of Memory.md for topic classification
@@ -164,7 +162,7 @@ The script:
 Claude Code must:
 
 1. **Classify** the source against `MEMORY_MD_EXCERPT` — pick a topic, confirm/revise the slug, write a ≤12-word description.
-2. **Write the wiki page** using the standard schema (same as normal ingest):
+2. **Write the wiki page** using the standard schema:
    - `# Title`, `**Source:**`, `**Date ingested:**`, `**Type:**`
    - `## Summary` ← 1–2 paragraphs; readable cold by someone new to the topic
    - `## Background / Context` ← OPTIONAL — prerequisites/jargon. Omit if topic is common knowledge.
@@ -186,20 +184,9 @@ python3 ~/.claude/skills/cortex/scripts/ingest.py <SOURCE_PATH> --yes \
   --description "One-line description of this source"
 ```
 
-Phase 2 skips (vs `--ollama` path):
-
-- No Ollama classify/generate/merge calls
-- No Ollama overview synthesis (appends a plain entry instead)
-- No Ollama back-patching (prints the pages that need cross-refs for you to handle)
-- Entity page creation/update still runs (using the entities you provided)
-
-### When to pass --ollama
-
-| Situation                                      | Use                   |
-| ---------------------------------------------- | --------------------- |
-| Default (Claude Code invoking ingest)          | No flag — claude-chat |
-| Batch ingesting many files overnight / cron    | `--ollama`            |
-| Scripted/non-Claude runs with Ollama available | `--ollama`            |
+Phase 2 then writes the wiki page, archives the source under `raw/`, updates
+`Memory.md` (master + per-topic), the topic `_overview.md`, `log.md`, the
+entity registry, and adds deterministic Related-Pages cross-references.
 
 ## Chat session ingest
 
@@ -244,9 +231,9 @@ print(dest)
 python3 ~/.claude/skills/cortex/scripts/ingest.py <path printed above> --yes
 ```
 
-Default mode is claude-chat — the script prints phase 1 output and exits with code 2.
-Claude Code then synthesizes the wiki page and re-runs with `--page-content-file`.
-Always pass `--yes` from Claude Code — the script cannot accept interactive input.
+The script prints phase 1 output and exits with code 2. Claude Code then
+synthesizes the wiki page and re-runs with `--page-content-file`. Always pass
+`--yes` from Claude Code — the script cannot accept interactive input.
 
 The script will:
 
@@ -254,12 +241,6 @@ The script will:
 - Copy the raw file to `raw/chats/`
 - Print SYNTHESIS PROMPT (phase 1) for Claude Code to consume
 - On re-run: write wiki page, update `Memory.md`, `log.md`, entities, cross-references
-
-Pass `--ollama` instead if you want the local model to synthesize (overnight batch).
-Ollama-specific flags that only apply with `--ollama`:
-
-- `--no-ping` — skip model warm-up
-- `--no-unload` — ping without evicting from VRAM first
 
 **Do not write wiki pages directly** — always go through `ingest.py` so the raw
 source is archived, the log is updated, and cross-references are maintained.

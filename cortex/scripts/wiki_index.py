@@ -42,19 +42,6 @@ LOG_TEMPLATE = """\
 
 """
 
-BACKPATCH_SYSTEM = """\
-You are editing a markdown wiki page.
-You will receive:
-1. The current content of the page
-2. A new "## Related Pages" entry to add
-
-Rules:
-- If "## Related Pages" already exists, append the new entry (no duplicates by slug)
-- If it does not exist, add it before "## Action Items" or before the final "---"
-- Return the COMPLETE updated file — no truncation, no fences, no commentary
-"""
-
-
 def posix_rel(path) -> str:
     """Return a path string with forward slashes — safe for markdown links on Windows."""
     from pathlib import Path
@@ -157,9 +144,17 @@ def append_log(log_path: Path, operation: str, detail: str):
 # ── Back-patching ─────────────────────────────────────────────────────────────
 
 
-def backpatch_file(target_path: Path, new_entry_line: str, call_local_fn, timeout: int = 600) -> bool:
-    """Add new_entry_line to target_path's Related Pages section.
-    Returns True if file was modified.
+def backpatch_file(target_path: Path, new_entry_line: str) -> bool:
+    """Append new_entry_line to target_path's "## Related Pages" section.
+
+    Deterministic — no LLM. Idempotent: skips if the slug in new_entry_line
+    already appears anywhere in the file.
+
+    If "## Related Pages" exists, the entry is appended at the end of that
+    section. If not, the section is created just before the trailing "---"
+    footer (or at end of file if no footer).
+
+    Returns True if the file was modified.
     """
     if not target_path.exists():
         print(f"  Skipping backpatch (not found): {target_path}", file=sys.stderr)
@@ -168,9 +163,41 @@ def backpatch_file(target_path: Path, new_entry_line: str, call_local_fn, timeou
     slug_m = re.search(r"\[([^\]]+)\]", new_entry_line)
     if slug_m and slug_m.group(1) in current:
         return False  # already linked
-    prompt = f"Current file:\n\n{current}\n\n" f"New related page entry to add:\n{new_entry_line}"
-    updated = call_local_fn(prompt, BACKPATCH_SYSTEM, timeout=timeout, label="backpatch")
-    target_path.write_text(updated, encoding="utf-8")
+
+    lines = current.splitlines()
+    related_idx = None
+    for i, line in enumerate(lines):
+        if line.strip() == "## Related Pages":
+            related_idx = i
+            break
+
+    if related_idx is not None:
+        # Find end of Related Pages section (next ## heading or trailing ---)
+        insert_at = len(lines)
+        for j in range(related_idx + 1, len(lines)):
+            stripped = lines[j].strip()
+            if stripped.startswith("## ") or stripped == "---":
+                insert_at = j
+                break
+        # Trim trailing blanks inside the section
+        while insert_at > related_idx + 1 and lines[insert_at - 1].strip() == "":
+            insert_at -= 1
+        lines.insert(insert_at, new_entry_line)
+    else:
+        # Create the section before the trailing "---" footer if present
+        footer_idx = None
+        for j in range(len(lines) - 1, -1, -1):
+            if lines[j].strip() == "---":
+                footer_idx = j
+                break
+        block = ["", "## Related Pages", new_entry_line, ""]
+        if footer_idx is not None:
+            for k, l in enumerate(block):
+                lines.insert(footer_idx + k, l)
+        else:
+            lines.extend(block)
+
+    target_path.write_text("\n".join(lines) + ("\n" if current.endswith("\n") else ""), encoding="utf-8")
     print(f"  Back-patched: {target_path.name}")
     return True
 
